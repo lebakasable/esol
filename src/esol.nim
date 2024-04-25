@@ -7,11 +7,9 @@ import
   std/logging,
   std/options,
   fusion/matching,
-  std/streams,
   std/enumerate,
   std/os,
   std/tables,
-  std/strutils,
   std/strformat
 
 type
