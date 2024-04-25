@@ -30,18 +30,6 @@ proc new_lexer*(source: string): Lexer =
     .split
     .filter_it(it != "")
 
-proc last*(self: Lexer): Option[string] =
-  if self.len > 0:
-    return some(self[self.len-1])
-
-proc peek*(self: Lexer): Option[string] =
-  if self.len > 0:
-    return some(self[0])
-
-proc peek_symbol*(self: var Lexer): Option[Symbol] =
-  if Some(@name) ?= self.peek:
-    return some(Symbol(name: name))
-
 proc next*(self: var Lexer): Option[string] =
   if self.len > 0:
     result = some(self[0])
@@ -49,6 +37,14 @@ proc next*(self: var Lexer): Option[string] =
 
 proc next_symbol*(self: var Lexer): Option[Symbol] =
   if Some(@name) ?= self.next:
+    return some(Symbol(name: name))
+
+proc peek*(self: Lexer): Option[string] =
+  if self.len > 0:
+    return some(self[0])
+
+proc peek_symbol*(self: var Lexer): Option[Symbol] =
+  if Some(@name) ?= self.peek:
     return some(Symbol(name: name))
 
 proc parse_symbol*(self: var Lexer): Symbol =

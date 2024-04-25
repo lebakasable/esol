@@ -79,6 +79,65 @@ proc match_state(self: Statement, program: Program, state: Sexpr, read: Sexpr): 
     else:
       panic &"Unknown sequence `{self.seq.name}`."
 
+proc parse_seq(lexer: var Lexer): seq[Sexpr] =
+  discard lexer.expect_symbol("{")
+  while Some(@symbol) ?= lexer.peek_symbol:
+    if symbol.name == "}": break
+    result.add(parse_sexpr(lexer))
+  discard lexer.expect_symbol("}")
+
+proc parse_case(lexer: var Lexer): Statement =
+  Statement(
+    kind: CaseStatement,
+    state:  parse_sexpr(lexer),
+    read:   parse_sexpr(lexer),
+    write:  parse_sexpr(lexer),
+    action: parse_sexpr(lexer),
+    next:   parse_sexpr(lexer)  ,
+  )
+  
+proc parse_statement(lexer: var Lexer): Statement =
+  let key = lexer.expect_symbol("case", "for")
+  case key.name
+  of "case": return parse_case(lexer)
+  of "for":
+    var vars = new_seq[Symbol]()
+    while Some(@symbol) ?= lexer.peek_symbol:
+      if symbol.name == ":": break
+      vars.add(lexer.parse_symbol())
+    discard lexer.expect_symbol(":")
+    let seq = lexer.parse_symbol()
+    result = parse_statement(lexer)
+    for i in countdown(vars.len - 1, 0):
+      result = Statement(
+        kind: ForStatement,
+        `var`: vars[i],
+        seq: seq,
+        body: result)
+
+proc parse_program(lexer: var Lexer): Program =
+  while Some(@key) ?= lexer.peek:
+    case key
+    of "run", "trace":
+      let keyword = lexer.expect_symbol("run", "trace")
+      result.runs.add(Run(
+        keyword: keyword,
+        state: parse_sexpr(lexer),
+        tape: parse_seq(lexer),
+        trace: keyword.name == "trace"
+      ))
+    of "let":
+      discard lexer.next
+      let name = lexer.parse_symbol()
+      if result.seqs.has_key(name.name):
+        panic &"Redefinition of sequence `{name.name}`."
+      let seq = parse_seq(lexer)
+      result.seqs[name.name] = seq
+    of "case", "for":
+      result.statements.add(parse_statement(lexer))
+    else:
+      panic &"Unknown keyword `{key}`."
+
 proc print(self: Machine) =
   for sexpr in self.tape:
     stdout.write &"{sexpr} "
@@ -116,75 +175,6 @@ proc next(self: var Machine, program: Program) =
       self.state = next
       self.halt = false
       break
- 
-proc parse_seq(lexer: var Lexer): seq[Sexpr] =
-  discard lexer.expect_symbol("{")
-  while Some(@symbol) ?= lexer.peek_symbol:
-    if symbol.name == "}": break
-    result.add(parse_sexpr(lexer))
-  discard lexer.expect_symbol("}")
-
-proc parse_case(lexer: var Lexer): Statement =
-  Statement(
-    kind: CaseStatement,
-    state:  parse_sexpr(lexer),
-    read:   parse_sexpr(lexer),
-    write:  parse_sexpr(lexer),
-    action: parse_sexpr(lexer),
-    next:   parse_sexpr(lexer)  ,
-  )
-  
-proc parse_statement(lexer: var Lexer): Statement =
-  let key = lexer.expect_symbol("case", "for")
-  case key.name
-  of "case": return parse_case(lexer)
-  of "for":
-    var vars = new_seq[Symbol]()
-    while Some(@symbol) ?= lexer.peek_symbol:
-      if symbol.name == ":": break
-      vars.add(lexer.parse_symbol())
-    discard lexer.expect_symbol(":")
-    let seq = lexer.parse_symbol()
-    result = parse_statement(lexer)
-    for i in countdown(vars.len - 1, 0):
-      result = Statement(
-        kind: ForStatement,
-        `var`: vars[i],
-        seq: seq,
-        body: result)
-
-proc parse_run(lexer: var Lexer): Run =
-  let keyword = lexer.expect_symbol("run", "trace")
-  return Run(
-    keyword: keyword,
-    state: parse_sexpr(lexer),
-    tape: parse_seq(lexer),
-    trace: keyword.name == "trace"
-  )
-
-proc parse_program(lexer: var Lexer): Program =
-  while Some(@key) ?= lexer.peek:
-    case key
-    of "run", "trace":
-      result.runs.add(parse_run(lexer))
-    of "let":
-      discard lexer.next
-      let name = lexer.parse_symbol()
-      if result.seqs.has_key(name.name):
-        panic &"Redefinition of sequence `{name.name}`."
-      let seq = parse_seq(lexer)
-      result.seqs[name.name] = seq
-    of "case", "for":
-      result.statements.add(parse_statement(lexer))
-    else:
-      panic &"Unknown keyword `{key}`."
-
-proc parse_program_file(program_path: string): (Program, string) =
-  let program_source = try: read_file(program_path)
-                       except: panic &"Could not read file `{program_path}`."
-
-  var lexer = new_lexer(program_source)
-  return (parse_program(lexer), program_source)
 
 proc usage(app_file: string) =
   stderr.write_line &"Usage: {app_file} <input.esol>"
@@ -203,7 +193,10 @@ proc main() =
     usage(app_file)
     panic "No program file is provided."
 
-  let (program, _) = parse_program_file(program_path)
+  let program_source = try: read_file(program_path)
+                       except: panic &"Could not read file `{program_path}`."
+  var lexer = new_lexer(program_source)
+  let program = parse_program(lexer)
 
   for i, run in enumerate(program.runs):
     echo "-".repeat(20)

@@ -18,6 +18,19 @@ type
       open_paren*: Symbol
       items*: seq[Sexpr]
 
+proc `$`*(self: Sexpr): string =
+  case self.kind:
+  of AtomSexpr:
+    return self.name.name
+  of ListSexpr:
+    var buffer = "("
+    for i, item in enumerate(self.items):
+      if i == 0:
+        buffer &= &"{item}"
+      else:
+        buffer &= &" {item}"
+    return buffer & ")"
+
 proc `==`*(self: Sexpr, other: Sexpr): bool =
   case (self.kind, other.kind)
   of (AtomSexpr, AtomSexpr):
@@ -28,19 +41,6 @@ proc `==`*(self: Sexpr, other: Sexpr): bool =
       if a != b: return false
     return true
   else: return false
-
-proc `$`*(self: Sexpr): string =
-  case self.kind:
-  of AtomSexpr:
-    return self.name.name
-  of ListSexpr:
-    var buffer = "("
-    for i, item in enumerate(self.items):
-      if i == 0:
-        buffer = &"{buffer}{item}"
-      else:
-        buffer = &"{buffer} {item}"
-    return buffer & ")"
 
 proc atom_name*(self: Sexpr): Option[Symbol] =
   if self.kind == AtomSexpr: return some(self.name)
