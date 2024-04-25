@@ -133,11 +133,19 @@ proc parse_statement(lexer: var Lexer): Statement =
   case key.name
   of "case": return parse_case(lexer)
   of "for":
-    let `var` = lexer.parse_symbol()
+    var vars = new_seq[Symbol]()
+    while Some(@symbol) ?= lexer.peek_symbol:
+      if symbol.name == "in": break
+      vars.add(lexer.parse_symbol())
     discard lexer.expect_symbol("in")
     let seq = lexer.parse_symbol()
-    let body = parse_statement(lexer)
-    return Statement(kind: ForStatement, `var`: `var`, seq: seq, body: body)
+    result = parse_statement(lexer)
+    for i in countdown(vars.len - 1, 0):
+      result = Statement(
+        kind: ForStatement,
+        `var`: vars[i],
+        seq: seq,
+        body: result)
 
 proc parse_run(lexer: var Lexer): Run =
   let keyword = lexer.expect_symbol("run")
@@ -172,7 +180,7 @@ proc parse_program_file(program_path: string): (Program, string) =
   return (parse_program(lexer), program_source)
 
 proc usage(app_file: string) =
-  stderr.write_line &"Usage: {app_file} <input.esol> <input.tape>"
+  stderr.write_line &"Usage: {app_file} <input.esol>"
   
 proc main() =
   var logger = new_console_logger()
