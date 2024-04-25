@@ -1,5 +1,3 @@
-{.experimental: "caseStmtMacros".}
-
 import
   esolpkg/utils,
   esolpkg/sexpr,
