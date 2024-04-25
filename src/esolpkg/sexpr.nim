@@ -1,10 +1,9 @@
 import
-  lexer,
+  ./lexer,
   fusion/matching,
   std/sequtils,
   std/options,
   std/enumerate,
-  std/streams,
   std/strformat
 
 type

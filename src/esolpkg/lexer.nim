@@ -1,5 +1,5 @@
 import
-  utils,
+  ./utils,
   std/strutils,
   std/options,
   std/sequtils,

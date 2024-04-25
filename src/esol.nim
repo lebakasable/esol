@@ -135,9 +135,9 @@ proc parse_statement(lexer: var Lexer): Statement =
   of "for":
     var vars = new_seq[Symbol]()
     while Some(@symbol) ?= lexer.peek_symbol:
-      if symbol.name == "in": break
+      if symbol.name == ":": break
       vars.add(lexer.parse_symbol())
-    discard lexer.expect_symbol("in")
+    discard lexer.expect_symbol(":")
     let seq = lexer.parse_symbol()
     result = parse_statement(lexer)
     for i in countdown(vars.len - 1, 0):
