@@ -34,6 +34,7 @@ type
     keyword: Symbol
     state: Sexpr
     tape: seq[Sexpr]
+    trace: bool
   Program = object
     statements: seq[Statement]
     seqs: Table[string, seq[Sexpr]]
@@ -148,17 +149,18 @@ proc parse_statement(lexer: var Lexer): Statement =
         body: result)
 
 proc parse_run(lexer: var Lexer): Run =
-  let keyword = lexer.expect_symbol("run")
+  let keyword = lexer.expect_symbol("run", "trace")
   return Run(
     keyword: keyword,
     state: parse_sexpr(lexer),
     tape: parse_seq(lexer),
+    trace: keyword.name == "trace"
   )
 
 proc parse_program(lexer: var Lexer): Program =
   while Some(@key) ?= lexer.peek:
     case key
-    of "run":
+    of "run", "trace":
       result.runs.add(parse_run(lexer))
     of "let":
       discard lexer.next
@@ -198,8 +200,8 @@ proc main() =
 
   let (program, _) = parse_program_file(program_path)
 
-  for run in program.runs:
-    echo "run"
+  for i, run in enumerate(program.runs):
+    if run.trace and i > 0: echo "-".repeat(20)
     
     var tape_default: Sexpr
     if Some(@sexpr) ?= run.tape.last: tape_default = sexpr
@@ -214,7 +216,7 @@ proc main() =
     )
 
     while not machine.halt:
-      machine.print()
+      if run.trace: machine.print()
       machine.halt = true
       machine.next(program)
 

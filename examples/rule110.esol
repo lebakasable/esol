@@ -12,6 +12,7 @@ case Reset1 & & <- Reset
 for a : Cells case Reset a a <- Reset
 case Reset & & -> I
 
+// for _ : Cells {
 for _ : Cells case (R . . .) _ . -> (I .)
 for _ : Cells case (R . . #) _ # -> (I .)
 for _ : Cells case (R . # .) _ # -> (I #)
@@ -20,5 +21,6 @@ for _ : Cells case (R # . .) _ . -> (I .)
 for _ : Cells case (R # . #) _ # -> (I .)
 for _ : Cells case (R # # .) _ # -> (I #)
 for _ : Cells case (R # # #) _ . -> (I #)
+// }
 
 run Entry { & . . . . . . . . . . . . . . . # . & }

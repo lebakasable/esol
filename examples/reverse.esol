@@ -4,4 +4,4 @@ for a b : Numbers
 case Swap (a b) (b a) -> Swap
 case Swap & & -> Halt
 
-run Swap { (1 2) (2 3) (3 4) & }
+trace Swap { (1 2) (2 3) (3 4) & }
