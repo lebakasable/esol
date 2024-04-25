@@ -237,4 +237,4 @@ proc main() =
       machine.halt = true
       machine.next(program)
 
-when isMainModule: main()
+when is_main_module: main()
