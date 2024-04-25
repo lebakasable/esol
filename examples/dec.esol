@@ -1,2 +1,0 @@
-case Dec 1 0 -> Halt
-case Dec 0 1 -> Dec

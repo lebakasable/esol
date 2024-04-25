@@ -28,3 +28,5 @@ case Reset_Bits & & <- Reset_Parens
 
 for p in Parens case Reset_Parens p p <- Reset_Parens
 case Reset_Parens & & -> Pick
+
+run Entry { & '(' '(' ')' ')' & 0 0 0 0 0 0 0 }

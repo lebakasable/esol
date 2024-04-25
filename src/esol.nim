@@ -10,7 +10,8 @@ import
   std/enumerate,
   std/os,
   std/tables,
-  std/strformat
+  std/strformat,
+  std/strutils
 
 type
   StatementKind = enum
@@ -29,9 +30,14 @@ type
       `var`: Symbol
       seq: Symbol
       body: Statement
+  Run = object
+    keyword: Symbol
+    state: Sexpr
+    tape: seq[Sexpr]
   Program = object
     statements: seq[Statement]
-    seqs: Table[string, seq[Symbol]]
+    seqs: Table[string, seq[Sexpr]]
+    runs: seq[Run]
   Machine = object
     state: Sexpr
     tape: seq[Sexpr]
@@ -39,16 +45,16 @@ type
     head: int
     halt: bool
 
-proc substitute(self: Statement, `var`: Symbol, symbol: Symbol): Statement =
+proc substitute(self: Statement, `var`: Symbol, sexpr: Sexpr): Statement =
   case self.kind
   of CaseStatement:
     result = Statement(
       kind:  CaseStatement,
-      state:   self.state.substitute(`var`, symbol),
-      read:     self.read.substitute(`var`, symbol),
-      write:   self.write.substitute(`var`, symbol),
-      action: self.action.substitute(`var`, symbol),
-      next:     self.next.substitute(`var`, symbol),
+      state:   self.state.substitute(`var`, sexpr),
+      read:     self.read.substitute(`var`, sexpr),
+      write:   self.write.substitute(`var`, sexpr),
+      action: self.action.substitute(`var`, sexpr),
+      next:     self.next.substitute(`var`, sexpr),
     )
   of ForStatement:
     return Statement(
@@ -56,19 +62,9 @@ proc substitute(self: Statement, `var`: Symbol, symbol: Symbol): Statement =
       `var`: self.`var`,
       # TODO: allow substituting the sequences
       seq:   self.seq,
-      body:  self.body.substitute(`var`, symbol),
+      body:  self.body.substitute(`var`, sexpr),
     )
 
-proc entry_state(self: Statement, program: Program): Option[Sexpr] =
-  case self.kind
-  of CaseStatement: return some(self.state)
-  of ForStatement:
-    if program.seqs.contains(self.seq.name):
-      if Some(@symbol) ?= program.seqs[self.seq.name].first:
-        return self.body.substitute(self.`var`, symbol).entry_state(program)
-    else:
-      panic &"Unknown sequence `{self.seq.name}`."
-  
 proc match_state(self: Statement, program: Program, state: Sexpr, read: Sexpr): Option[(Sexpr, Sexpr, Sexpr)] =
   case self.kind
   of CaseStatement:
@@ -76,22 +72,20 @@ proc match_state(self: Statement, program: Program, state: Sexpr, read: Sexpr): 
       return some((self.write, self.action, self.next))
   of ForStatement:
     if program.seqs.contains(self.seq.name):
-      for symbol in program.seqs[self.seq.name]:
-        if Some(@triple) ?= self.body.substitute(self.`var`, symbol).match_state(program, state, read):
+      for sexpr in program.seqs[self.seq.name]:
+        if Some(@triple) ?= self.body.substitute(self.`var`, sexpr).match_state(program, state, read):
           return some(triple)
     else:
       panic &"Unknown sequence `{self.seq.name}`."
 
-proc entry_state(self: Program): Option[Sexpr] =
-  for statement in self.statements:
-    if Some(@state) ?= statement.entry_state(self):
-      return some(state)
-
 proc print(self: Machine) =
-  stdout.write self.state, ": "
+  var buffer = &"{self.state}: "
+  var head = 0
   for i, sexpr in enumerate(self.tape):
-    stdout.write sexpr, " "
-  echo()
+    if i == self.head:
+      head = buffer.len
+    buffer &= &"{sexpr} "
+  echo &"{buffer}\n{' '.repeat(head)}^"
 
 proc next(self: var Machine, program: Program) =
   for statement in program.statements:
@@ -117,12 +111,12 @@ proc next(self: var Machine, program: Program) =
       self.halt = false
       break
  
-proc parse_seq(lexer: var Lexer): seq[Symbol] =
+proc parse_seq(lexer: var Lexer): seq[Sexpr] =
   discard lexer.expect_symbol("{")
-  while lexer.peek.is_some:
-    let symbol = lexer.parse_symbol()
+  while Some(@symbol) ?= lexer.peek_symbol:
     if symbol.name == "}": break
-    result.add(symbol)
+    result.add(parse_sexpr(lexer))
+  discard lexer.expect_symbol("}")
 
 proc parse_case(lexer: var Lexer): Statement =
   Statement(
@@ -144,12 +138,20 @@ proc parse_statement(lexer: var Lexer): Statement =
     let seq = lexer.parse_symbol()
     let body = parse_statement(lexer)
     return Statement(kind: ForStatement, `var`: `var`, seq: seq, body: body)
-      
+
+proc parse_run(lexer: var Lexer): Run =
+  let keyword = lexer.expect_symbol("run")
+  return Run(
+    keyword: keyword,
+    state: parse_sexpr(lexer),
+    tape: parse_seq(lexer),
+  )
+
 proc parse_program(lexer: var Lexer): Program =
   while Some(@key) ?= lexer.peek:
     case key
-    of "case", "for":
-      result.statements.add(parse_statement(lexer))
+    of "run":
+      result.runs.add(parse_run(lexer))
     of "let":
       discard lexer.next
       let name = lexer.parse_symbol()
@@ -157,6 +159,8 @@ proc parse_program(lexer: var Lexer): Program =
         panic &"Redefinition of sequence `{name.name}`."
       let seq = parse_seq(lexer)
       result.seqs[name.name] = seq
+    of "case", "for":
+      result.statements.add(parse_statement(lexer))
     else:
       panic &"Unknown keyword `{key}`."
 
@@ -166,17 +170,6 @@ proc parse_program_file(program_path: string): (Program, string) =
 
   var lexer = new_lexer(program_source)
   return (parse_program(lexer), program_source)
-
-proc parse_sexprs(lexer: var Lexer): seq[Sexpr] =
-  while lexer.peek.is_some:
-    result.add(parse_sexpr(lexer))
-
-proc parse_tape_file(tape_path: string): (seq[Sexpr], string) =
-  let tape_source = try: read_file(tape_path)
-                    except: panic &"Could not read file `{tape_path}`."
-
-  var lexer = new_lexer(tape_source)
-  return (parse_sexprs(lexer), tape_source)
 
 proc usage(app_file: string) =
   stderr.write_line &"Usage: {app_file} <input.esol> <input.tape>"
@@ -195,35 +188,26 @@ proc main() =
     usage(app_file)
     panic "No program file is provided."
 
-  var tape_path: string
-  if Some(@path) ?= args.shift:
-    tape_path = path
-  else:
-    usage(app_file)
-    panic "No tape file is provided."
-
   let (program, _) = parse_program_file(program_path)
 
-  var state: Sexpr
-  if Some(@sexpr) ?= program.entry_state: state = sexpr
-  else: panic "Source file must contain at least one case."
-  
-  let (tape, _) = parse_tape_file(tape_path)
+  for run in program.runs:
+    echo "run"
+    
+    var tape_default: Sexpr
+    if Some(@sexpr) ?= run.tape.last: tape_default = sexpr
+    else: panic "Tape file should not be empty, it must contain at least one symbol to be repeated indefinitely."
 
-  var tape_default: Sexpr
-  if Some(@sexpr) ?= tape.last: tape_default = sexpr
-  else: panic "Tape file should not be empty, it must contain at least one symbol to be repeated indefinitely."
+    var machine = Machine(
+      state: run.state,
+      tape: run.tape,
+      tape_default: tape_default,
+      head: 0,
+      halt: false,
+    )
 
-  var machine = Machine(
-    state: state,
-    tape: tape,
-    tape_default: tape_default,
-    head: 0,
-    halt: false,
-  )
-
-  while not machine.halt:
-    machine.halt = true
-    machine.next(program)
+    while not machine.halt:
+      machine.print()
+      machine.halt = true
+      machine.next(program)
 
 when isMainModule: main()

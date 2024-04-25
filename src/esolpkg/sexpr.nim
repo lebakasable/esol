@@ -46,16 +46,15 @@ proc `$`*(self: Sexpr): string =
 proc atom_name*(self: Sexpr): Option[Symbol] =
   if self.kind == AtomSexpr: return some(self.name)
  
-# TODO: support `symbol` being sexpr
-proc substitute*(self: Sexpr, `var`: Symbol, symbol: Symbol): Sexpr =
+proc substitute*(self: Sexpr, `var`: Symbol, sexpr: Sexpr): Sexpr =
   case self.kind
   of AtomSexpr:
     if self.name == `var`:
-      return Sexpr(kind: AtomSexpr, name: symbol)
+      return sexpr
     else: 
       return self
   of ListSexpr:
-    let items = self.items.map_it(it.substitute(`var`, symbol))
+    let items = self.items.map_it(it.substitute(`var`, sexpr))
     return Sexpr(kind: ListSexpr, open_paren: self.open_paren, items: items)
     
 proc parse_sexpr*(lexer: var Lexer): Sexpr =

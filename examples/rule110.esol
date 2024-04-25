@@ -20,3 +20,5 @@ for _ in Cells case (R # . .) _ . -> (I .)
 for _ in Cells case (R # . #) _ # -> (I .)
 for _ in Cells case (R # # .) _ # -> (I #)
 for _ in Cells case (R # # #) _ . -> (I #)
+
+run Entry { & . . . . . . . . . . . . . . . # . & }
