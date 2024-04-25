@@ -31,6 +31,7 @@ type
     tape_default: Symbol
     head: int
     halt: bool
+  # TODO: proper lexer so symbols have a location
   Lexer = seq[string]
 
 method next(self: var Machine, cases: seq[Case]) {.base.} =
