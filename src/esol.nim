@@ -11,12 +11,14 @@ import
   std/os,
   std/tables,
   std/strformat,
-  std/strutils
+  std/strutils,
+  std/sequtils
 
 type
   StatementKind = enum
     CaseStatement
     ForStatement
+    BlockStatement
   Statement = ref object
     case kind: StatementKind
     of CaseStatement:
@@ -30,6 +32,8 @@ type
       `var`: Symbol
       seq: Symbol
       body: Statement
+    of BlockStatement:
+      statements: seq[Statement]
   Run = object
     keyword: Symbol
     state: Sexpr
@@ -65,6 +69,11 @@ proc substitute(self: Statement, `var`: Symbol, sexpr: Sexpr): Statement =
       seq:   self.seq,
       body:  self.body.substitute(`var`, sexpr),
     )
+  of BlockStatement:
+    return Statement(
+      kind: BlockStatement,
+      statements: self.statements.map_it(it.substitute(`var`, sexpr))
+    )
 
 proc match_state(self: Statement, program: Program, state: Sexpr, read: Sexpr): Option[(Sexpr, Sexpr, Sexpr)] =
   case self.kind
@@ -78,6 +87,10 @@ proc match_state(self: Statement, program: Program, state: Sexpr, read: Sexpr): 
           return some(triple)
     else:
       panic &"Unknown sequence `{self.seq.name}`."
+  of BlockStatement:
+    for statement in self.statements:
+      if Some(@triple) ?= statement.match_state(program, state, read):
+        return some(triple)
 
 proc parse_seq(lexer: var Lexer): seq[Sexpr] =
   discard lexer.expect_symbol("{")
@@ -86,20 +99,18 @@ proc parse_seq(lexer: var Lexer): seq[Sexpr] =
     result.add(parse_sexpr(lexer))
   discard lexer.expect_symbol("}")
 
-proc parse_case(lexer: var Lexer): Statement =
-  Statement(
-    kind: CaseStatement,
-    state:  parse_sexpr(lexer),
-    read:   parse_sexpr(lexer),
-    write:  parse_sexpr(lexer),
-    action: parse_sexpr(lexer),
-    next:   parse_sexpr(lexer)  ,
-  )
-  
 proc parse_statement(lexer: var Lexer): Statement =
-  let key = lexer.expect_symbol("case", "for")
+  let key = lexer.expect_symbol("case", "for", "{")
   case key.name
-  of "case": return parse_case(lexer)
+  of "case":
+    return Statement(
+      kind: CaseStatement,
+      state:  parse_sexpr(lexer),
+      read:   parse_sexpr(lexer),
+      write:  parse_sexpr(lexer),
+      action: parse_sexpr(lexer),
+      next:   parse_sexpr(lexer),
+    )
   of "for":
     var vars = new_seq[Symbol]()
     while Some(@symbol) ?= lexer.peek_symbol:
@@ -114,6 +125,16 @@ proc parse_statement(lexer: var Lexer): Statement =
         `var`: vars[i],
         seq: seq,
         body: result)
+  of "{":
+    var statements = new_seq[Statement]()
+    while Some(@symbol) ?= lexer.peek_symbol:
+      if symbol.name == "}": break
+      statements.add(parse_statement(lexer))
+    discard lexer.expect_symbol("}")
+    return Statement(
+      kind: BlockStatement,
+      statements: statements,
+    )
 
 proc parse_program(lexer: var Lexer): Program =
   while Some(@key) ?= lexer.peek:
