@@ -1,36 +1,19 @@
 {.experimental: "caseStmtMacros".}
 
 import
+  esolpkg/utils,
+  esolpkg/lexer,
   std/logging,
-  std/strutils,
-  std/sequtils,
   std/options,
   fusion/matching,
   std/streams,
   std/enumerate,
   std/os,
-  std/tables
-    
-template panic(args: varargs[string, `$`]) =
-  error(args)
-  quit(1)
-  
-proc peek[T](s: seq[T]): Option[T] =
-  if s.len > 0:
-    result = some(s[0])
-
-proc last[T](s: seq[T]): Option[T] =
-  if s.len > 0:
-    result = some(s[s.len-1])
-
-proc next[T](s: var seq[T]): Option[T] =
-  if s.len > 0:
-    result = some(s[0])
-    s = s[1..s.len-1]
+  std/tables,
+  std/strutils,
+  std/strformat
 
 type
-  Symbol = object
-    name: string
   StatementKind = enum
     CaseStatement
     ForStatement
@@ -55,9 +38,7 @@ type
     tape_default: Symbol
     head: int
     halt: bool
-  # TODO: proper lexer so symbols have a location
-  Lexer = seq[string]
-  
+
 proc substitute(self: Statement, `var`: Symbol, symbol: Symbol): Statement =
   case self.kind
   of CaseStatement:
@@ -83,10 +64,10 @@ proc entry_state(self: Statement, program: Program): Option[Symbol] =
   of CaseStatement: return some(self.state)
   of ForStatement:
     if program.seqs.contains(self.seq.name):
-      if Some(@symbol) ?= program.seqs[self.seq.name].peek:
+      if Some(@symbol) ?= program.seqs[self.seq.name].first:
         return self.body.substitute(self.`var`, symbol).entry_state(program)
     else:
-      panic "Unknown sequence `", self.seq.name, "`."
+      panic &"Unknown sequence `{self.seq.name}`."
   
 proc match(self: Statement, program: Program, state: Symbol, read: Symbol): Option[(Symbol, Symbol, Symbol)] =
   case self.kind
@@ -99,7 +80,7 @@ proc match(self: Statement, program: Program, state: Symbol, read: Symbol): Opti
         if Some(@triple) ?= self.body.substitute(self.`var`, symbol).match(program, state, read):
           return some(triple)
     else:
-      panic "Unknown sequence `", self.seq.name, "`."
+      panic &"Unknown sequence `{self.seq.name}`."
 
 proc entry_state(self: Program): Option[Symbol] =
   for statement in self.statements:
@@ -132,60 +113,36 @@ proc print(self: Machine) =
     if i == self.head:
       head = buffer.data.len
     buffer.write symbol.name, " "
-  echo buffer.data
-  for _ in 0..<head:
-    stdout.write " "
-  echo "^"
+  echo &"{buffer.data}\n{' '.repeat(head)}^"
   
-proc parse_symbol(lexer: var Lexer): Symbol =
-  if Some(@name) ?= lexer.next:
-    return Symbol(name: name)
-  else:
-    panic "Expected symbol but reached the end of the input."
-
-proc expect_symbol(lexer: var Lexer, expected_names: varargs[string]): Symbol =
-  let symbol = parse_symbol(lexer)
-  for name in expected_names:
-    if symbol.name == name:
-      return symbol
-  var buffer = new_string_stream()
-  for i, name in enumerate(expected_names):
-    if i == 0:
-      buffer.write "`", name, "`"
-    elif i + 1 == expected_names.len:
-      buffer.write ", or `", name, "`"
-    else:
-      buffer.write ", `", name, "`"
-  panic "Expected ", buffer.data, " but got `", symbol.name, "`."
-
 proc parse_seq(lexer: var Lexer): seq[Symbol] =
-  discard expect_symbol(lexer, "{")
+  discard lexer.expect_symbol("{")
   while lexer.peek.is_some:
-    let symbol = parse_symbol(lexer)
+    let symbol = lexer.parse_symbol()
     if symbol.name == "}": break
     result.add(symbol)
 
 proc parse_case(lexer: var Lexer): Statement =
   Statement(
     kind: CaseStatement,
-    state: parse_symbol(lexer),
-    read: parse_symbol(lexer),
-    write: parse_symbol(lexer),
-    step: expect_symbol(lexer, "->", "<-"),
-    next: parse_symbol(lexer)  ,
+    state: lexer.parse_symbol(),
+    read: lexer.parse_symbol(),
+    write: lexer.parse_symbol(),
+    step: lexer.expect_symbol("->", "<-"),
+    next: lexer.parse_symbol()  ,
   )
   
 proc parse_statement(lexer: var Lexer): Statement =
-  let key = expect_symbol(lexer, "case", "for")
+  let key = lexer.expect_symbol("case", "for")
   case key.name
   of "case": return parse_case(lexer)
   of "for":
-    let `var` = parse_symbol(lexer)
-    discard expect_symbol(lexer, "in")
-    let seq = parse_symbol(lexer)
+    let `var` = lexer.parse_symbol()
+    discard lexer.expect_symbol("in")
+    let seq = lexer.parse_symbol()
     let body = parse_statement(lexer)
     return Statement(kind: ForStatement, `var`: `var`, seq: seq, body: body)
-    
+      
 proc parse_program(lexer: var Lexer): Program =
   while Some(@key) ?= lexer.peek:
     case key
@@ -193,34 +150,34 @@ proc parse_program(lexer: var Lexer): Program =
       result.statements.add(parse_statement(lexer))
     of "let":
       discard lexer.next
-      let name = parse_symbol(lexer)
+      let name = lexer.parse_symbol()
       if result.seqs.has_key(name.name):
-        panic "Redefinition of sequence `", name.name, "`."
+        panic &"Redefinition of sequence `{name.name}`."
       let seq = parse_seq(lexer)
       result.seqs[name.name] = seq
     else:
-      panic "Unknown keyword `", key, "`."
+      panic &"Unknown keyword `{key}`."
 
 proc parse_program_file(program_path: string): (Program, string) =
   let program_source = try: read_file(program_path)
-                       except: panic "Could not read file `", program_path, "`."
+                       except: panic &"Could not read file `{program_path}`."
 
-  var lexer = program_source.split.filter_it(it != "")
+  var lexer = new_lexer(program_source)
   return (parse_program(lexer), program_source)
 
 proc parse_symbols(lexer: var Lexer): seq[Symbol] =
   while lexer.peek.is_some:
-    result.add(parse_symbol(lexer))
+    result.add(lexer.parse_symbol())
 
 proc parse_tape_file(tape_path: string): (seq[Symbol], string) =
   let tape_source = try: read_file(tape_path)
-                    except: panic "Could not read file `", tape_path, "`."
+                    except: panic &"Could not read file `{tape_path}`."
 
-  var lexer = tape_source.split.filter_it(it != "")
+  var lexer = new_lexer(tape_source)
   return (parse_symbols(lexer), tape_source)
 
 proc usage(app_file: string) =
-  stderr.write_line "Usage: ", app_file, " <input.esol> <input.tape>"
+  stderr.write_line &"Usage: {app_file} <input.esol> <input.tape>"
   
 proc main() =
   var logger = new_console_logger()
@@ -230,14 +187,14 @@ proc main() =
   let app_file = get_app_filename()
 
   var program_path: string
-  if Some(@path) ?= args.next:
+  if Some(@path) ?= args.shift:
     program_path = path
   else:
     usage(app_file)
     panic "No program file is provided."
 
   var tape_path: string
-  if Some(@path) ?= args.next:
+  if Some(@path) ?= args.shift:
     tape_path = path
   else:
     usage(app_file)
