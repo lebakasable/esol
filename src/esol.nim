@@ -80,6 +80,11 @@ proc match_state(self: Statement, program: Program, state: Sexpr, read: Sexpr): 
       panic &"Unknown sequence `{self.seq.name}`."
 
 proc print(self: Machine) =
+  for sexpr in self.tape:
+    stdout.write &"{sexpr} "
+  echo()
+
+proc trace(self: Machine) =
   var buffer = &"{self.state}: "
   var head = 0
   for i, sexpr in enumerate(self.tape):
@@ -201,7 +206,7 @@ proc main() =
   let (program, _) = parse_program_file(program_path)
 
   for i, run in enumerate(program.runs):
-    if run.trace and i > 0: echo "-".repeat(20)
+    echo "-".repeat(20)
     
     var tape_default: Sexpr
     if Some(@sexpr) ?= run.tape.last: tape_default = sexpr
@@ -216,7 +221,7 @@ proc main() =
     )
 
     while not machine.halt:
-      if run.trace: machine.print()
+      if run.trace: machine.trace()
       machine.halt = true
       machine.next(program)
 
