@@ -2,7 +2,6 @@ import
   esolpkg/utils,
   esolpkg/sexpr,
   esolpkg/lexer,
-  std/logging,
   std/options,
   fusion/matching,
   std/enumerate,
@@ -101,10 +100,10 @@ proc match_state(self: Statement, program: Program, state: Sexpr, read: Sexpr): 
           if Some(@triple) ?= subs_body.match_state(program, state, read):
             return some(triple)
         else:
-          panic &"`{self.`var`}` does not match `{sexpr}` from set `{self.set}`."
-          # note &"The matched value is located here."
+          error self.`var`.loc, &"`{self.`var`}` does not match `{sexpr}` from set `{self.set}`."
+          info sexpr.loc, "The matched value is located here."
     else:
-      panic &"Unknown set `{self.set}`."
+      panic self.set.loc, &"Unknown set `{self.set}`."
   of BlockStatement:
     for statement in self.statements:
       if Some(@triple) ?= statement.match_state(program, state, read):
@@ -123,14 +122,15 @@ proc expand(self: Statement, program: Program) =
             subs_body = subs_body.substitute(key, value)
           subs_body.expand(program)
         else:
-          panic &"`{self.`var`}` does not match `{sexpr}` from set `{self.set}`."
+          error self.`var`.loc, &"`{self.`var`}` does not match `{sexpr}` from set `{self.set}`."
+          info sexpr.loc, "The matched value is located here."
   of BlockStatement:
     for statement in self.statements:
       echo statement
 
 proc parse_seq(lexer: var Lexer): seq[Sexpr] =
   discard lexer.expect_symbol("{")
-  while Some(@symbol) ?= lexer.peek_symbol:
+  while Some(@symbol) ?= lexer.peek():
     if symbol.name == "}": break
     result.add(parse_sexpr(lexer))
   discard lexer.expect_symbol("}")
@@ -149,7 +149,7 @@ proc parse_statement(lexer: var Lexer): Statement =
     )
   of "for":
     var vars = new_seq[Sexpr]()
-    while Some(@symbol) ?= lexer.peek_symbol:
+    while Some(@symbol) ?= lexer.peek():
       if symbol.name == ":": break
       vars.add(parse_sexpr(lexer))
     discard lexer.expect_symbol(":")
@@ -163,7 +163,7 @@ proc parse_statement(lexer: var Lexer): Statement =
         body: result)
   of "{":
     var statements = new_seq[Statement]()
-    while Some(@symbol) ?= lexer.peek_symbol:
+    while Some(@symbol) ?= lexer.peek():
       if symbol.name == "}": break
       statements.add(parse_statement(lexer))
     discard lexer.expect_symbol("}")
@@ -173,8 +173,8 @@ proc parse_statement(lexer: var Lexer): Statement =
     )
 
 proc parse_program(lexer: var Lexer): Program =
-  while Some(@key) ?= lexer.peek:
-    case key
+  while Some(@key) ?= lexer.peek():
+    case key.name
     of "run", "trace":
       let keyword = lexer.expect_symbol("run", "trace")
       result.runs.add(Run(
@@ -187,13 +187,13 @@ proc parse_program(lexer: var Lexer): Program =
       discard lexer.next
       let name = lexer.parse_symbol()
       if result.sets.has_key(name.name):
-        panic &"Redefinition of set `{name}`."
+        panic name.loc, &"Redefinition of set `{name}`."
       let seq = parse_seq(lexer)
       result.sets[name.name] = seq
     of "case", "for":
       result.statements.add(parse_statement(lexer))
     else:
-      panic &"Unknown keyword `{key}`."
+      panic key.loc, &"Unknown keyword `{key}`."
 
 proc print(self: Machine) =
   for sexpr in self.tape:
@@ -217,7 +217,7 @@ proc next(self: var Machine, program: Program) =
         case action.name:
           of "<-":
             if self.head == 0:
-              panic "Tape underflow."
+              panic action.loc, "Tape underflow."
             self.head -= 1
           of "->":
             self.head += 1
@@ -226,9 +226,9 @@ proc next(self: var Machine, program: Program) =
           of ".": discard
           of "!": self.print()
           else:
-            panic "Action can only be `->`, `<-`, `.` or `!`."
+            panic action.loc, "Action can only be `->`, `<-`, `.` or `!`."
       else:
-        panic "Action must be an atom."
+        panic action.loc, "Action must be a symbol."
       self.state = next
       self.halt = false
       break
@@ -262,7 +262,7 @@ commands = @[
 
       let program_source = try: read_file(program_path)
                            except: panic &"Could not read file `{program_path}`."
-      var lexer = new_lexer(program_source)
+      var lexer = tokenize(program_path, program_source)
       let program = parse_program(lexer)
 
       setControlCHook(nil)
@@ -272,7 +272,7 @@ commands = @[
     
         var tape_default: Sexpr
         if Some(@sexpr) ?= run.tape.last: tape_default = sexpr
-        else: panic "Tape file should not be empty, it must contain at least one symbol to be repeated indefinitely."
+        else: panic "Tape should not be empty, it must contain at least one symbol to be repeated indefinitely."
 
         var machine = Machine(
           state: run.state,
@@ -301,7 +301,7 @@ commands = @[
 
       let program_source = try: read_file(program_path)
                            except: panic &"Could not read file `{program_path}`."
-      var lexer = new_lexer(program_source)
+      var lexer = tokenize(program_path, program_source)
       let program = parse_program(lexer)
 
       for statement in program.statements:
@@ -314,13 +314,29 @@ commands = @[
           tape &= &"{sexpr} "
         tape &= "}"
         echo &"{keyword} {run.state} {tape}"
+  ),
+  Command(
+    name: "lex",
+    description: "Lexes an Esol program.",
+    signature: "<input.esol>",
+    run: proc (app_file: string, args: var seq[string]) =
+      var program_path: string
+      if Some(@path) ?= args.shift:
+        program_path = path
+      else:
+        usage(app_file)
+        panic "No program file is provided."
+
+      let program_source = try: read_file(program_path)
+                           except: panic &"Could not read file `{program_path}`."
+      var lexer = tokenize(program_path, program_source)
+
+      for symbol in lexer.symbols:
+        echo &"{symbol.loc}: {symbol.name}"
   )
 ]
   
 proc main() =
-  var logger = new_console_logger()
-  add_handler(logger)
-
   var args = command_line_params()
   let app_file = get_app_filename()
 

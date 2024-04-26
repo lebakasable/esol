@@ -24,7 +24,7 @@ proc parse_sexpr*(lexer: var Lexer): Sexpr =
   case symbol.name
   of "(":
     var items = new_seq[Sexpr]()
-    while Some(@next_symbol) ?= lexer.peek_symbol():
+    while Some(@next_symbol) ?= lexer.peek():
       if next_symbol.name == ")": break
       items.add(parse_sexpr(lexer))
     discard lexer.expect_symbol(")")
@@ -86,3 +86,8 @@ proc pattern_match*(self: Sexpr, value: Sexpr, bindings: var Table[Symbol, Sexpr
     else:
       result = false
   else: result = false
+
+proc loc*(self: Sexpr): Location =
+  case self.kind
+  of AtomSexpr: return self.name.loc
+  of ListSexpr: return self.open_paren.loc
