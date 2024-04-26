@@ -26,8 +26,8 @@ case (Reset Bits) a a <- (Reset Bits)
 case (Reset Bits) & & <- (Reset Parens)
 
 for p : Paren
-case (Reset Paren) p p <- (Reset Parens)
-case (Reset Paren) & & -> Pick
+case (Reset Parens) p p <- (Reset Parens)
+case (Reset Parens) & & -> Pick
 
 case Dec  1 1 -> Dec
 case Dec  0 0 <- Dec1
