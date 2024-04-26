@@ -1,5 +1,5 @@
-let Parens { '(' ')' }
-let Bits { 0 1 }
+set Parens { '(' ')' }
+set Bits { 0 1 }
 
 trace Entry { & '(' '(' ')' ')' & 0 }
 

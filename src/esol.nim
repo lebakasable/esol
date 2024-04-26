@@ -27,8 +27,8 @@ type
       next: Sexpr
     of ForStatement:
       `var`: Sexpr
-      # TODO: support sexpr for `seq`
-      seq: Symbol
+      # TODO: support sexpr for `set`
+      set: Symbol
       body: Statement
     of BlockStatement:
       statements: seq[Statement]
@@ -63,8 +63,8 @@ proc substitute(self: Statement, `var`: Symbol, sexpr: Sexpr): Statement =
     return Statement(
       kind: ForStatement,
       `var`: self.`var`,
-      # TODO: allow substituting the sequences
-      seq:   self.seq,
+      # TODO: allow substituting the sets
+      set:   self.set,
       body:  self.body.substitute(`var`, sexpr),
     )
   of BlockStatement:
@@ -79,8 +79,8 @@ proc match_state(self: Statement, program: Program, state: Sexpr, read: Sexpr): 
     if self.state == state and self.read == read:
       return some((self.write, self.action, self.next))
   of ForStatement:
-    if program.seqs.contains(self.seq.name):
-      for sexpr in program.seqs[self.seq.name]:
+    if program.seqs.contains(self.set.name):
+      for sexpr in program.seqs[self.set.name]:
         var bindings = init_table[Symbol, Sexpr]()
         if self.`var`.pattern_match(sexpr, bindings):
           var subs_body = self.body
@@ -89,10 +89,10 @@ proc match_state(self: Statement, program: Program, state: Sexpr, read: Sexpr): 
           if Some(@triple) ?= subs_body.match_state(program, state, read):
             return some(triple)
         else:
-          panic &"`{self.`var`}` does not match `{sexpr}` from sequence `{self.seq.name}`."
+          panic &"`{self.`var`}` does not match `{sexpr}` from set `{self.set.name}`."
           # note &"The matched value is located here."
     else:
-      panic &"Unknown sequence `{self.seq.name}`."
+      panic &"Unknown set `{self.set.name}`."
   of BlockStatement:
     for statement in self.statements:
       if Some(@triple) ?= statement.match_state(program, state, read):
@@ -123,13 +123,13 @@ proc parse_statement(lexer: var Lexer): Statement =
       if symbol.name == ":": break
       vars.add(parse_sexpr(lexer))
     discard lexer.expect_symbol(":")
-    let seq = lexer.parse_symbol()
+    let set = lexer.parse_symbol()
     result = parse_statement(lexer)
     for i in countdown(vars.len - 1, 0):
       result = Statement(
         kind: ForStatement,
         `var`: vars[i],
-        seq: seq,
+        set: set,
         body: result)
   of "{":
     var statements = new_seq[Statement]()
@@ -153,11 +153,11 @@ proc parse_program(lexer: var Lexer): Program =
         tape: parse_seq(lexer),
         trace: keyword.name == "trace"
       ))
-    of "let":
+    of "set":
       discard lexer.next
       let name = lexer.parse_symbol()
       if result.seqs.has_key(name.name):
-        panic &"Redefinition of sequence `{name.name}`."
+        panic &"Redefinition of set `{name.name}`."
       let seq = parse_seq(lexer)
       result.seqs[name.name] = seq
     of "case", "for":

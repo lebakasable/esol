@@ -1,4 +1,4 @@
-let Cells { . # }
+set Cells { . # }
 
 case Entry & & -> I
 
