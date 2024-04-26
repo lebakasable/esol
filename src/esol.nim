@@ -202,9 +202,56 @@ proc next(self: var Machine, program: Program) =
       self.state = next
       self.halt = false
       break
-
+  
 proc usage(app_file: string) =
   stderr.write_line &"Usage: {app_file} <input.esol>"
+
+type Command = object
+  name: string
+  description: string
+  signature: string
+  run: proc (app_file: string, args: var seq[string])
+let commands = @[
+  Command(
+    name: "run",
+    description: "Runs an Esol program.",
+    signature: "<input.esol>",
+    run: proc (app_file: string, args: var seq[string]) =
+      var program_path: string
+      if Some(@path) ?= args.shift:
+        program_path = path
+      else:
+        usage(app_file)
+        panic "No program file is provided."
+
+      let program_source = try: read_file(program_path)
+                           except: panic &"Could not read file `{program_path}`."
+      var lexer = new_lexer(program_source)
+      let program = parse_program(lexer)
+
+      setControlCHook(nil)
+
+      for i, run in enumerate(program.runs):
+        echo "-".repeat(20)
+    
+        var tape_default: Sexpr
+        if Some(@sexpr) ?= run.tape.last: tape_default = sexpr
+        else: panic "Tape file should not be empty, it must contain at least one symbol to be repeated indefinitely."
+
+        var machine = Machine(
+          state: run.state,
+          tape: run.tape,
+          tape_default: tape_default,
+          head: 0,
+          halt: false,
+        )
+
+        while not machine.halt:
+          if run.trace: machine.trace()
+          machine.halt = true
+          machine.next(program)
+  )
+]
   
 proc main() =
   var logger = new_console_logger()
@@ -213,38 +260,17 @@ proc main() =
   var args = command_line_params()
   let app_file = get_app_filename()
 
-  var program_path: string
-  if Some(@path) ?= args.shift:
-    program_path = path
+  var command: string
+  if Some(@name) ?= args.shift:
+    command = name
   else:
     usage(app_file)
-    panic "No program file is provided."
+    panic "No command is provided."
 
-  let program_source = try: read_file(program_path)
-                       except: panic &"Could not read file `{program_path}`."
-  var lexer = new_lexer(program_source)
-  let program = parse_program(lexer)
-
-  setControlCHook(nil)
-
-  for i, run in enumerate(program.runs):
-    echo "-".repeat(20)
-    
-    var tape_default: Sexpr
-    if Some(@sexpr) ?= run.tape.last: tape_default = sexpr
-    else: panic "Tape file should not be empty, it must contain at least one symbol to be repeated indefinitely."
-
-    var machine = Machine(
-      state: run.state,
-      tape: run.tape,
-      tape_default: tape_default,
-      head: 0,
-      halt: false,
-    )
-
-    while not machine.halt:
-      if run.trace: machine.trace()
-      machine.halt = true
-      machine.next(program)
+  let matched_command = commands.filter_it(it.name == command)
+  if matched_command.len > 0:
+    matched_command[0].run(app_file, args)
+  else:
+    panic &"Unknown command `{command}`."
 
 when is_main_module: main()
