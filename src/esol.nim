@@ -225,6 +225,8 @@ proc main() =
   var lexer = new_lexer(program_source)
   let program = parse_program(lexer)
 
+  setControlCHook(nil)
+
   for i, run in enumerate(program.runs):
     echo "-".repeat(20)
     
