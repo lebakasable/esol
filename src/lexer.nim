@@ -40,8 +40,8 @@ proc tokenize*(filePath: string, source: string): Lexer =
           discard word.shift()
           loc.col += 1
         if word.len > 1 and word[word.len-1] in [')', '}', ':']:
-          result.symbols.add(Symbol(name: $word[word.len-2], loc: loc))
-          discard word.shift()
+          result.symbols.add(Symbol(name: word[0..word.len-2], loc: loc))
+          word = $word[word.len-1]
           loc.col += word.len
 
         result.symbols.add(Symbol(name: word, loc: loc))
