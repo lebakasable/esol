@@ -1,7 +1,7 @@
 import
-  esolpkg/utils,
-  esolpkg/sexpr,
-  esolpkg/lexer,
+  ./utils,
+  ./list,
+  ./lexer,
   std/options,
   fusion/matching,
   std/enumerate,
@@ -13,207 +13,207 @@ import
 
 type
   StatementKind = enum
-    CaseStatement
-    ForStatement
-    BlockStatement
+    skCase
+    skFor
+    skBlock
   Statement = ref object
     case kind: StatementKind
-    of CaseStatement:
-      state: Sexpr
-      read: Sexpr
-      write: Sexpr
-      action: Sexpr
-      next: Sexpr
-    of ForStatement:
-      `var`: Sexpr
-      # TODO: support sexpr for `set`
+    of skCase:
+      state: List
+      read: List
+      write: List
+      action: List
+      next: List
+    of skFor:
+      `var`: List
+      # TODO: support list for `set`
       set: Symbol
       body: Statement
-    of BlockStatement:
+    of skBlock:
       statements: seq[Statement]
   Run = object
     keyword: Symbol
-    state: Sexpr
-    tape: seq[Sexpr]
+    state: List
+    tape: seq[List]
     trace: bool
   Program = object
     statements: seq[Statement]
-    sets: Table[string, seq[Sexpr]]
+    sets: Table[string, seq[List]]
     runs: seq[Run]
   Machine = object
-    state: Sexpr
-    tape: seq[Sexpr]
-    tape_default: Sexpr
+    state: List
+    tape: seq[List]
+    tapeDefault: List
     head: int
     halt: bool
 
 proc `$`(self: Statement): string =
   case self.kind
-  of CaseStatement:
+  of skCase:
     return &"case {self.state} {self.read} {self.write} {self.action} {self.next}"
-  of ForStatement:
+  of skFor:
     return &"for {self.`var`} : {self.set} {self.body}"
-  of BlockStatement:
+  of skBlock:
     result = "{\n"
     for statement in self.statements:
       result &= &"  {statement}\n"
     result &= "}"
 
-proc substitute(self: Statement, `var`: Symbol, sexpr: Sexpr): Statement =
+proc substitute(self: Statement, `var`: Symbol, list: List): Statement =
   case self.kind
-  of CaseStatement:
+  of skCase:
     result = Statement(
-      kind:  CaseStatement,
-      state:   self.state.substitute(`var`, sexpr),
-      read:     self.read.substitute(`var`, sexpr),
-      write:   self.write.substitute(`var`, sexpr),
-      action: self.action.substitute(`var`, sexpr),
-      next:     self.next.substitute(`var`, sexpr),
+      kind:  skCase,
+      state:   self.state.substitute(`var`, list),
+      read:     self.read.substitute(`var`, list),
+      write:   self.write.substitute(`var`, list),
+      action: self.action.substitute(`var`, list),
+      next:     self.next.substitute(`var`, list),
     )
-  of ForStatement:
+  of skFor:
     return Statement(
-      kind: ForStatement,
+      kind: skFor,
       `var`: self.`var`,
       # TODO: allow substituting the sets
       set:   self.set,
-      body:  self.body.substitute(`var`, sexpr),
+      body:  self.body.substitute(`var`, list),
     )
-  of BlockStatement:
+  of skBlock:
     return Statement(
-      kind: BlockStatement,
-      statements: self.statements.map_it(it.substitute(`var`, sexpr))
+      kind: skBlock,
+      statements: self.statements.mapIt(it.substitute(`var`, list))
     )
 
-proc match_state(self: Statement, program: Program, state: Sexpr, read: Sexpr): Option[(Sexpr, Sexpr, Sexpr)] =
+proc matchState(self: Statement, program: var Program, state: List, read: List): Option[(List, List, List)] =
   case self.kind
-  of CaseStatement:
+  of skCase:
     if self.state == state and self.read == read:
       return some((self.write, self.action, self.next))
-  of ForStatement:
-    if program.sets.contains(self.set.name):
-      for sexpr in program.sets[self.set.name]:
-        var bindings = init_table[Symbol, Sexpr]()
-        if self.`var`.pattern_match(sexpr, bindings):
-          var subs_body = self.body
+  of skFor:
+    if Some(@lists) ?= program.sets.get(self.set.name):
+      for list in lists:
+        var bindings = initTable[Symbol, List]()
+        if self.`var`.patternMatch(list, bindings):
+          var subsBody = self.body
           for key, value in bindings:
-            subs_body = subs_body.substitute(key, value)
-          if Some(@triple) ?= subs_body.match_state(program, state, read):
+            subsBody = subsBody.substitute(key, value)
+          if Some(@triple) ?= subsBody.matchState(program, state, read):
             return some(triple)
         else:
-          error self.`var`.loc, &"`{self.`var`}` does not match `{sexpr}` from set `{self.set}`."
-          info sexpr.loc, "The matched value is located here."
+          error self.`var`.loc, &"`{self.`var`}` does not match `{list}` from set `{self.set}`."
+          info list.loc, "The matched value is located here."
     else:
       panic self.set.loc, &"Unknown set `{self.set}`."
-  of BlockStatement:
+  of skBlock:
     for statement in self.statements:
-      if Some(@triple) ?= statement.match_state(program, state, read):
+      if Some(@triple) ?= statement.matchState(program, state, read):
         return some(triple)
 
-proc expand(self: Statement, program: Program) =
+proc expand(self: Statement, program: var Program) =
   case self.kind
-  of CaseStatement: echo self
-  of ForStatement:
-    if program.sets.contains(self.set.name):
-      for sexpr in program.sets[self.set.name]:
-        var bindings = init_table[Symbol, Sexpr]()
-        if self.`var`.pattern_match(sexpr, bindings):
-          var subs_body = self.body
+  of skCase: echo self
+  of skFor:
+    if Some(@lists) ?= program.sets.get(self.set.name):
+      for list in lists:
+        var bindings = initTable[Symbol, List]()
+        if self.`var`.patternMatch(list, bindings):
+          var subsBody = self.body
           for key, value in bindings:
-            subs_body = subs_body.substitute(key, value)
-          subs_body.expand(program)
+            subsBody = subsBody.substitute(key, value)
+          subsBody.expand(program)
         else:
-          error self.`var`.loc, &"`{self.`var`}` does not match `{sexpr}` from set `{self.set}`."
-          info sexpr.loc, "The matched value is located here."
-  of BlockStatement:
+          error self.`var`.loc, &"`{self.`var`}` does not match `{list}` from set `{self.set}`."
+          info list.loc, "The matched value is located here."
+  of skBlock:
     for statement in self.statements:
       echo statement
 
-proc parse_seq(lexer: var Lexer): seq[Sexpr] =
-  discard lexer.expect_symbol("{")
+proc parseSeq(lexer: var Lexer): seq[List] =
+  discard lexer.expectSymbol("{")
   while Some(@symbol) ?= lexer.peek():
     if symbol.name == "}": break
-    result.add(parse_sexpr(lexer))
-  discard lexer.expect_symbol("}")
+    result.add(parseList(lexer))
+  discard lexer.expectSymbol("}")
 
-proc parse_statement(lexer: var Lexer): Statement =
-  let key = lexer.expect_symbol("case", "for", "{")
+proc parseStatement(lexer: var Lexer): Statement =
+  let key = lexer.expectSymbol("case", "for", "{")
   case key.name
   of "case":
     return Statement(
-      kind: CaseStatement,
-      state:  parse_sexpr(lexer),
-      read:   parse_sexpr(lexer),
-      write:  parse_sexpr(lexer),
-      action: parse_sexpr(lexer),
-      next:   parse_sexpr(lexer),
+      kind: skCase,
+      state:  parseList(lexer),
+      read:   parseList(lexer),
+      write:  parseList(lexer),
+      action: parseList(lexer),
+      next:   parseList(lexer),
     )
   of "for":
-    var vars = new_seq[Sexpr]()
+    var vars = newSeq[List]()
     while Some(@symbol) ?= lexer.peek():
       if symbol.name == ":": break
-      vars.add(parse_sexpr(lexer))
-    discard lexer.expect_symbol(":")
-    let set = lexer.parse_symbol()
-    result = parse_statement(lexer)
+      vars.add(parseList(lexer))
+    discard lexer.expectSymbol(":")
+    let set = lexer.expectSymbol()
+    result = parseStatement(lexer)
     for i in countdown(vars.len - 1, 0):
       result = Statement(
-        kind: ForStatement,
+        kind: skFor,
         `var`: vars[i],
         set: set,
         body: result)
   of "{":
-    var statements = new_seq[Statement]()
+    var statements = newSeq[Statement]()
     while Some(@symbol) ?= lexer.peek():
       if symbol.name == "}": break
-      statements.add(parse_statement(lexer))
-    discard lexer.expect_symbol("}")
+      statements.add(parseStatement(lexer))
+    discard lexer.expectSymbol("}")
     return Statement(
-      kind: BlockStatement,
+      kind: skBlock,
       statements: statements,
     )
 
-proc parse_program(lexer: var Lexer): Program =
+proc parseProgram(lexer: var Lexer): Program =
   while Some(@key) ?= lexer.peek():
     case key.name
     of "run", "trace":
-      let keyword = lexer.expect_symbol("run", "trace")
+      let keyword = lexer.expectSymbol("run", "trace")
       result.runs.add(Run(
         keyword: keyword,
-        state: parse_sexpr(lexer),
-        tape: parse_seq(lexer),
+        state: parseList(lexer),
+        tape: parseSeq(lexer),
         trace: keyword.name == "trace"
       ))
     of "set":
       discard lexer.next
-      let name = lexer.parse_symbol()
-      if result.sets.has_key(name.name):
+      let name = lexer.expectSymbol()
+      if result.sets.hasKey(name.name):
         panic name.loc, &"Redefinition of set `{name}`."
-      let seq = parse_seq(lexer)
+      let seq = parseSeq(lexer)
       result.sets[name.name] = seq
     of "case", "for":
-      result.statements.add(parse_statement(lexer))
+      result.statements.add(parseStatement(lexer))
     else:
       panic key.loc, &"Unknown keyword `{key}`."
 
 proc print(self: Machine) =
-  for sexpr in self.tape:
-    stdout.write &"{sexpr} "
+  for list in self.tape:
+    stdout.write &"{list} "
   echo()
 
 proc trace(self: Machine) =
   var buffer = &"{self.state}: "
   var head = 0
-  for i, sexpr in enumerate(self.tape):
+  for i, list in enumerate(self.tape):
     if i == self.head:
       head = buffer.len
-    buffer &= &"{sexpr} "
+    buffer &= &"{list} "
   echo &"{buffer}\n{' '.repeat(head)}^"
 
-proc next(self: var Machine, program: Program) =
+proc next(self: var Machine, program: var Program) =
   for statement in program.statements:
-    if Some((@write, @action, @next)) ?= statement.match_state(program, self.state, self.tape[self.head]):
+    if Some((@write, @action, @next)) ?= statement.matchState(program, self.state, self.tape[self.head]):
       self.tape[self.head] = write
-      if Some(@action) ?= action.atom_name:
+      if Some(@action) ?= action.atomName:
         case action.name:
           of "<-":
             if self.head == 0:
@@ -222,7 +222,7 @@ proc next(self: var Machine, program: Program) =
           of "->":
             self.head += 1
             if self.head >= self.tape.len:
-              self.tape.add(self.tape_default)
+              self.tape.add(self.tapeDefault)
           of ".": discard
           of "!": self.print()
           else:
@@ -237,47 +237,47 @@ type Command = object
   name: string
   description: string
   signature: string
-  run: proc (app_file: string, args: var seq[string])
+  run: proc (appFile: string, args: var seq[string])
 
-var commands = new_seq[Command]()
+var commands = newSeq[Command]()
   
-proc usage(app_file: string) =
-  stderr.write_line &"Usage: {app_file} <COMMAND> [ARGS]"
-  stderr.write_line &"COMMANDS:"
+proc usage(appFile: string) =
+  stderr.writeLine &"Usage: {appFile} <COMMAND> [ARGS]"
+  stderr.writeLine &"COMMANDS:"
   for command in commands:
-    stderr.write_line &"  {command} {command.signature}\t{command.description}"
+    stderr.writeLine &"  {command} {command.signature}\t{command.description}"
 
 commands = @[
   Command(
     name: "run",
     description: "Runs an Esol program.",
     signature: "<input.esol>",
-    run: proc (app_file: string, args: var seq[string]) =
-      var program_path: string
+    run: proc (appFile: string, args: var seq[string]) =
+      var programPath: string
       if Some(@path) ?= args.shift:
-        program_path = path
+        programPath = path
       else:
-        usage(app_file)
+        usage(appFile)
         panic "No program file is provided."
 
-      let program_source = try: read_file(program_path)
-                           except: panic &"Could not read file `{program_path}`."
-      var lexer = tokenize(program_path, program_source)
-      let program = parse_program(lexer)
+      let programSource = try: readFile(programPath)
+                           except: panic &"Could not read file `{programPath}`."
+      var lexer = tokenize(programPath, programSource)
+      var program = parseProgram(lexer)
 
       setControlCHook(nil)
 
       for i, run in enumerate(program.runs):
         if i > 0: echo "-".repeat(20)
     
-        var tape_default: Sexpr
-        if Some(@sexpr) ?= run.tape.last: tape_default = sexpr
+        var tapeDefault: List
+        if Some(@list) ?= run.tape.last(): tapeDefault = list
         else: panic "Tape should not be empty, it must contain at least one symbol to be repeated indefinitely."
 
         var machine = Machine(
           state: run.state,
           tape: run.tape,
-          tape_default: tape_default,
+          tapeDefault: tapeDefault,
           head: 0,
           halt: false,
         )
@@ -291,18 +291,18 @@ commands = @[
     name: "expand",
     description: "Expands an Esol program.",
     signature: "<input.esol>",
-    run: proc (app_file: string, args: var seq[string]) =
-      var program_path: string
+    run: proc (appFile: string, args: var seq[string]) =
+      var programPath: string
       if Some(@path) ?= args.shift:
-        program_path = path
+        programPath = path
       else:
-        usage(app_file)
+        usage(appFile)
         panic "No program file is provided."
 
-      let program_source = try: read_file(program_path)
-                           except: panic &"Could not read file `{program_path}`."
-      var lexer = tokenize(program_path, program_source)
-      let program = parse_program(lexer)
+      let programSource = try: readFile(programPath)
+                           except: panic &"Could not read file `{programPath}`."
+      var lexer = tokenize(programPath, programSource)
+      var program = parseProgram(lexer)
 
       for statement in program.statements:
         statement.expand(program)
@@ -310,8 +310,8 @@ commands = @[
       for run in program.runs:
         let keyword = if run.trace: "trace" else: "run"
         var tape = "{ "
-        for sexpr in run.tape:
-          tape &= &"{sexpr} "
+        for list in run.tape:
+          tape &= &"{list} "
         tape &= "}"
         echo &"{keyword} {run.state} {tape}"
   ),
@@ -319,17 +319,17 @@ commands = @[
     name: "lex",
     description: "Lexes an Esol program.",
     signature: "<input.esol>",
-    run: proc (app_file: string, args: var seq[string]) =
-      var program_path: string
+    run: proc (appFile: string, args: var seq[string]) =
+      var programPath: string
       if Some(@path) ?= args.shift:
-        program_path = path
+        programPath = path
       else:
-        usage(app_file)
+        usage(appFile)
         panic "No program file is provided."
 
-      let program_source = try: read_file(program_path)
-                           except: panic &"Could not read file `{program_path}`."
-      var lexer = tokenize(program_path, program_source)
+      let programSource = try: readFile(programPath)
+                           except: panic &"Could not read file `{programPath}`."
+      var lexer = tokenize(programPath, programSource)
 
       for symbol in lexer.symbols:
         echo &"{symbol.loc}: {symbol.name}"
@@ -337,20 +337,20 @@ commands = @[
 ]
   
 proc main() =
-  var args = command_line_params()
-  let app_file = get_app_filename()
+  var args = commandLineParams()
+  let appFile = getAppFilename()
 
   var command: string
   if Some(@name) ?= args.shift:
     command = name
   else:
-    usage(app_file)
+    usage(appFile)
     panic "No command is provided."
 
-  let matched_command = commands.filter_it(it.name == command)
-  if matched_command.len > 0:
-    matched_command[0].run(app_file, args)
+  let matchedCommand = commands.filterIt(it.name == command)
+  if matchedCommand.len > 0:
+    matchedCommand[0].run(appFile, args)
   else:
     panic &"Unknown command `{command}`."
 
-when is_main_module: main()
+when isMainModule: main()

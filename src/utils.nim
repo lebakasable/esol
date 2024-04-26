@@ -1,6 +1,6 @@
 import
   std/options,
-  std/strformat
+  std/tables
 
 template info*(message: string) =
   stderr.write_line("INFO: ", message)
@@ -39,3 +39,7 @@ proc shift*(s: var string): Option[char] =
   if s.len > 0:
     result = some(s[0])
     s = s[1..s.len-1]
+
+proc get*[A, B](t: var Table[A, B], key: A): Option[B] =
+  if t.contains(key):
+    return some(t[key])
