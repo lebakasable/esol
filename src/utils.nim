@@ -3,16 +3,22 @@ import
   std/tables
 
 template info*(message: string) =
-  stderr.write_line("INFO: ", message)
+  stderr.writeLine("INFO: ", message)
 
 template info*(loc: untyped, message: string) =
-  stderr.write_line(loc, ": INFO: ", message)
+  stderr.writeLine(loc, ": INFO: ", message)
+
+template note*(message: string) =
+  stderr.writeLine("NOTE: ", message)
+
+template note*(loc: untyped, message: string) =
+  stderr.writeLine(loc, ": note: ", message)
 
 template error*(message: string) =
-  stderr.write_line("ERROR: ", message)
+  stderr.writeLine("ERROR: ", message)
 
 template error*(loc: untyped, message: string) =
-  stderr.write_line(loc, ": ERROR: ", message)
+  stderr.writeLine(loc, ": ERROR: ", message)
 
 template panic*(message: string) =
   error(message)
