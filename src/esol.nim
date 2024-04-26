@@ -26,8 +26,8 @@ type
       action: Sexpr
       next: Sexpr
     of ForStatement:
-      # TODO: support sexpr for `var` and `seq`
-      `var`: Symbol
+      `var`: Sexpr
+      # TODO: support sexpr for `seq`
       seq: Symbol
       body: Statement
     of BlockStatement:
@@ -81,8 +81,16 @@ proc match_state(self: Statement, program: Program, state: Sexpr, read: Sexpr): 
   of ForStatement:
     if program.seqs.contains(self.seq.name):
       for sexpr in program.seqs[self.seq.name]:
-        if Some(@triple) ?= self.body.substitute(self.`var`, sexpr).match_state(program, state, read):
-          return some(triple)
+        var bindings = init_table[Symbol, Sexpr]()
+        if self.`var`.pattern_match(sexpr, bindings):
+          var subs_body = self.body
+          for key, value in bindings:
+            subs_body = subs_body.substitute(key, value)
+          if Some(@triple) ?= subs_body.match_state(program, state, read):
+            return some(triple)
+        else:
+          panic &"`{self.`var`}` does not match `{sexpr}` from sequence `{self.seq.name}`."
+          # note &"The matched value is located here."
     else:
       panic &"Unknown sequence `{self.seq.name}`."
   of BlockStatement:
@@ -110,10 +118,10 @@ proc parse_statement(lexer: var Lexer): Statement =
       next:   parse_sexpr(lexer),
     )
   of "for":
-    var vars = new_seq[Symbol]()
+    var vars = new_seq[Sexpr]()
     while Some(@symbol) ?= lexer.peek_symbol:
       if symbol.name == ":": break
-      vars.add(lexer.parse_symbol())
+      vars.add(parse_sexpr(lexer))
     discard lexer.expect_symbol(":")
     let seq = lexer.parse_symbol()
     result = parse_statement(lexer)

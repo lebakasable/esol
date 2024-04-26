@@ -1,0 +1,6 @@
+let Substitutes { (0 1) (1 0) }
+
+for (a b) : Substitutes
+case I a b -> I
+
+trace I { 0 0 0 1 1 1 & }

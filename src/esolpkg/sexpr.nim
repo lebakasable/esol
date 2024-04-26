@@ -4,7 +4,8 @@ import
   std/sequtils,
   std/options,
   std/enumerate,
-  std/strformat
+  std/strformat,
+  std/tables
 
 type
   SexprKind* = enum
@@ -17,6 +18,22 @@ type
     of ListSexpr:
       open_paren*: Symbol
       items*: seq[Sexpr]
+
+proc parse_sexpr*(lexer: var Lexer): Sexpr =
+  let symbol = lexer.parse_symbol()
+  case symbol.name
+  of "(":
+    var items = new_seq[Sexpr]()
+    while Some(@next_symbol) ?= lexer.peek_symbol():
+      if next_symbol.name == ")": break
+      items.add(parse_sexpr(lexer))
+    discard lexer.expect_symbol(")")
+    return Sexpr(
+      kind: ListSexpr,
+      open_paren: symbol,
+      items: items,
+    )
+  else: return Sexpr(kind: AtomSexpr, name: symbol)
 
 proc `$`*(self: Sexpr): string =
   case self.kind:
@@ -56,18 +73,16 @@ proc substitute*(self: Sexpr, `var`: Symbol, sexpr: Sexpr): Sexpr =
     let items = self.items.map_it(it.substitute(`var`, sexpr))
     return Sexpr(kind: ListSexpr, open_paren: self.open_paren, items: items)
     
-proc parse_sexpr*(lexer: var Lexer): Sexpr =
-  let symbol = lexer.parse_symbol()
-  case symbol.name
-  of "(":
-    var items = new_seq[Sexpr]()
-    while Some(@next_symbol) ?= lexer.peek_symbol():
-      if next_symbol.name == ")": break
-      items.add(parse_sexpr(lexer))
-    discard lexer.expect_symbol(")")
-    return Sexpr(
-      kind: ListSexpr,
-      open_paren: symbol,
-      items: items,
-    )
-  else: return Sexpr(kind: AtomSexpr, name: symbol)
+proc pattern_match*(self: Sexpr, value: Sexpr, bindings: var Table[Symbol, Sexpr]): bool =
+  result = true
+  case (self.kind, value.kind)
+  of (AtomSexpr, _):
+    bindings[self.name] = value
+  of (ListSexpr, ListSexpr):
+    if self.items.len == value.items.len:
+      for (a, b) in self.items.zip(value.items):
+        if not a.pattern_match(b, bindings):
+          result = false
+    else:
+      result = false
+  else: result = false
