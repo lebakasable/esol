@@ -29,22 +29,23 @@ proc tokenize*(file_path: string, source: string): Lexer =
 
   let lines = source.split_lines()
   for line in lines:
-    let words = line.split_whitespace()
-    for word in words:
-      var word = word
-      loc.col += last_word_len
+    if not line.starts_with("//"):
+      let words = line.split_whitespace()
+      for word in words:
+        var word = word
+        loc.col += last_word_len
   
-      if word.len > 1 and word[0] in ['(', '{', ':']:
-        result.symbols.add(Symbol(name: $word[0], loc: loc))
-        discard word.shift()
-        loc.col += 1
-      if word.len > 1 and word[word.len-1] in [')', '}', ':']:
-        result.symbols.add(Symbol(name: $word[word.len-2], loc: loc))
-        discard word.shift()
-        loc.col += word.len
+        if word.len > 1 and word[0] in ['(', '{', ':']:
+          result.symbols.add(Symbol(name: $word[0], loc: loc))
+          discard word.shift()
+          loc.col += 1
+        if word.len > 1 and word[word.len-1] in [')', '}', ':']:
+          result.symbols.add(Symbol(name: $word[word.len-2], loc: loc))
+          discard word.shift()
+          loc.col += word.len
 
-      result.symbols.add(Symbol(name: word, loc: loc))
-      last_word_len = word.len + 1
+        result.symbols.add(Symbol(name: word, loc: loc))
+        last_word_len = word.len + 1
     loc.row += 1
     loc.col = 0
     last_word_len = 1
