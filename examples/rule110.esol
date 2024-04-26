@@ -1,18 +1,18 @@
-set Cells { . # }
+set Cell { . # }
 
 case Entry & & -> I
 
-for a     : Cells case I       a a -> (I a)
-for a b   : Cells case (I a)   b b -> (I a b)
-for a b c : Cells case (I a b) c c <- (R a b c)
-for a b   : Cells case (I a b) & & .  Print
+for a     : Cell case I       a a -> (I a)
+for a b   : Cell case (I a)   b b -> (I a b)
+for a b c : Cell case (I a b) c c <- (R a b c)
+for a b   : Cell case (I a b) & & .  Print
 
 case Print & & ! Reset1
 case Reset1 & & <- Reset
-for a : Cells case Reset a a <- Reset
+for a : Cell case Reset a a <- Reset
 case Reset & & -> I
 
-for _ : Cells {
+for _ : Cell {
 	case (R . . .) _ . -> (I .)
 	case (R . . #) _ # -> (I .)
 	case (R . # .) _ # -> (I #)

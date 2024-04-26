@@ -1,18 +1,18 @@
-set Parens { '(' ')' }
-set Bits { 0 1 }
+set Paren { '(' ')' }
+set Bit { 0 1 }
 
 trace Entry { & '(' '(' ')' ')' & 0 }
 
 case Entry & & -> Pick
 
-for p : Parens
+for p : Paren
 case Pick p & -> (Pick p)
 case Pick & & -> Verify
 
 case Verify 0 0 -> Balanced
 case Verify 1 1 -> Unbalanced
 
-for p a : Parens
+for p a : Paren
 case (Pick p) a a -> (Pick p)
 
 case (Pick '(') & & -> Inc
@@ -21,13 +21,13 @@ case (Pick ')') & & -> Dec
 case Inc 0 1 <- (Reset Bits)
 case Inc 1 1 -> Inc
 
-for a : Bits
+for a : Bit
 case (Reset Bits) a a <- (Reset Bits)
 case (Reset Bits) & & <- (Reset Parens)
 
-for p : Parens
-case (Reset Parens) p p <- (Reset Parens)
-case (Reset Parens) & & -> Pick
+for p : Paren
+case (Reset Paren) p p <- (Reset Parens)
+case (Reset Paren) & & -> Pick
 
 case Dec  1 1 -> Dec
 case Dec  0 0 <- Dec1

@@ -1,6 +1,6 @@
-set Substitutes { (0 1) (1 0) }
+set Substitute { (0 1) (1 0) }
 
-for (a b) : Substitutes
+for (a b) : Substitute
 case I a b -> I
 
 trace I { 0 0 0 1 1 1 & }
