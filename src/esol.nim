@@ -39,7 +39,7 @@ type
     trace: bool
   Program = object
     statements: seq[Statement]
-    seqs: Table[string, seq[Sexpr]]
+    sets: Table[string, seq[Sexpr]]
     runs: seq[Run]
   Machine = object
     state: Sexpr
@@ -47,6 +47,18 @@ type
     tape_default: Sexpr
     head: int
     halt: bool
+
+proc `$`(self: Statement): string =
+  case self.kind
+  of CaseStatement:
+    return &"case {self.state} {self.read} {self.write} {self.action} {self.next}"
+  of ForStatement:
+    return &"for {self.`var`} : {self.set.name} {self.body}"
+  of BlockStatement:
+    result = "{\n"
+    for statement in self.statements:
+      result &= &"  {statement}\n"
+    result &= "}"
 
 proc substitute(self: Statement, `var`: Symbol, sexpr: Sexpr): Statement =
   case self.kind
@@ -79,8 +91,8 @@ proc match_state(self: Statement, program: Program, state: Sexpr, read: Sexpr): 
     if self.state == state and self.read == read:
       return some((self.write, self.action, self.next))
   of ForStatement:
-    if program.seqs.contains(self.set.name):
-      for sexpr in program.seqs[self.set.name]:
+    if program.sets.contains(self.set.name):
+      for sexpr in program.sets[self.set.name]:
         var bindings = init_table[Symbol, Sexpr]()
         if self.`var`.pattern_match(sexpr, bindings):
           var subs_body = self.body
@@ -97,6 +109,24 @@ proc match_state(self: Statement, program: Program, state: Sexpr, read: Sexpr): 
     for statement in self.statements:
       if Some(@triple) ?= statement.match_state(program, state, read):
         return some(triple)
+
+proc expand(self: Statement, program: Program) =
+  case self.kind
+  of CaseStatement: echo self
+  of ForStatement:
+    if program.sets.contains(self.set.name):
+      for sexpr in program.sets[self.set.name]:
+        var bindings = init_table[Symbol, Sexpr]()
+        if self.`var`.pattern_match(sexpr, bindings):
+          var subs_body = self.body
+          for key, value in bindings:
+            subs_body = subs_body.substitute(key, value)
+          subs_body.expand(program)
+        else:
+          panic &"`{self.`var`}` does not match `{sexpr}` from set `{self.set.name}`."
+  of BlockStatement:
+    for statement in self.statements:
+      echo statement
 
 proc parse_seq(lexer: var Lexer): seq[Sexpr] =
   discard lexer.expect_symbol("{")
@@ -156,10 +186,10 @@ proc parse_program(lexer: var Lexer): Program =
     of "set":
       discard lexer.next
       let name = lexer.parse_symbol()
-      if result.seqs.has_key(name.name):
+      if result.sets.has_key(name.name):
         panic &"Redefinition of set `{name.name}`."
       let seq = parse_seq(lexer)
-      result.seqs[name.name] = seq
+      result.sets[name.name] = seq
     of "case", "for":
       result.statements.add(parse_statement(lexer))
     else:
@@ -203,15 +233,21 @@ proc next(self: var Machine, program: Program) =
       self.halt = false
       break
   
-proc usage(app_file: string) =
-  stderr.write_line &"Usage: {app_file} <input.esol>"
-
 type Command = object
   name: string
   description: string
   signature: string
   run: proc (app_file: string, args: var seq[string])
-let commands = @[
+
+var commands = new_seq[Command]()
+  
+proc usage(app_file: string) =
+  stderr.write_line &"Usage: {app_file} <COMMAND> [ARGS]"
+  stderr.write_line &"COMMANDS:"
+  for command in commands:
+    stderr.write_line &"  {command.name} {command.signature}\t{command.description}"
+
+commands = @[
   Command(
     name: "run",
     description: "Runs an Esol program.",
@@ -232,7 +268,7 @@ let commands = @[
       setControlCHook(nil)
 
       for i, run in enumerate(program.runs):
-        echo "-".repeat(20)
+        if i > 0: echo "-".repeat(20)
     
         var tape_default: Sexpr
         if Some(@sexpr) ?= run.tape.last: tape_default = sexpr
@@ -250,6 +286,34 @@ let commands = @[
           if run.trace: machine.trace()
           machine.halt = true
           machine.next(program)
+  ),
+  Command(
+    name: "expand",
+    description: "Expands an Esol program.",
+    signature: "<input.esol>",
+    run: proc (app_file: string, args: var seq[string]) =
+      var program_path: string
+      if Some(@path) ?= args.shift:
+        program_path = path
+      else:
+        usage(app_file)
+        panic "No program file is provided."
+
+      let program_source = try: read_file(program_path)
+                           except: panic &"Could not read file `{program_path}`."
+      var lexer = new_lexer(program_source)
+      let program = parse_program(lexer)
+
+      for statement in program.statements:
+        statement.expand(program)
+
+      for run in program.runs:
+        let keyword = if run.trace: "trace" else: "run"
+        var tape = "{ "
+        for sexpr in run.tape:
+          tape &= &"{sexpr} "
+        tape &= "}"
+        echo &"{keyword} {run.state} {tape}"
   )
 ]
   
