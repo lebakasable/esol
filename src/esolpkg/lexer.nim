@@ -5,7 +5,8 @@ import
   std/sequtils,
   std/enumerate,
   fusion/matching,
-  std/streams
+  std/streams,
+  std/strformat
 
 type
   Symbol* = object
@@ -13,6 +14,8 @@ type
   # TODO: proper lexer so symbols have a location
   Lexer* = seq[string]
 
+proc `$`*(self: Symbol): string = self.name
+  
 proc new_lexer*(source: string): Lexer =
   source
     .multi_replace(
@@ -66,4 +69,4 @@ proc expect_symbol*(self: var Lexer, expected_names: varargs[string]): Symbol =
       buffer.write ", or `", name, "`"
     else:
       buffer.write ", `", name, "`"
-  panic "Expected ", buffer.data, " but got `", symbol.name, "`."
+  panic &"Expected {buffer.data} but got `{symbol}`."

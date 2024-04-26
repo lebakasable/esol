@@ -53,7 +53,7 @@ proc `$`(self: Statement): string =
   of CaseStatement:
     return &"case {self.state} {self.read} {self.write} {self.action} {self.next}"
   of ForStatement:
-    return &"for {self.`var`} : {self.set.name} {self.body}"
+    return &"for {self.`var`} : {self.set} {self.body}"
   of BlockStatement:
     result = "{\n"
     for statement in self.statements:
@@ -101,10 +101,10 @@ proc match_state(self: Statement, program: Program, state: Sexpr, read: Sexpr): 
           if Some(@triple) ?= subs_body.match_state(program, state, read):
             return some(triple)
         else:
-          panic &"`{self.`var`}` does not match `{sexpr}` from set `{self.set.name}`."
+          panic &"`{self.`var`}` does not match `{sexpr}` from set `{self.set}`."
           # note &"The matched value is located here."
     else:
-      panic &"Unknown set `{self.set.name}`."
+      panic &"Unknown set `{self.set}`."
   of BlockStatement:
     for statement in self.statements:
       if Some(@triple) ?= statement.match_state(program, state, read):
@@ -123,7 +123,7 @@ proc expand(self: Statement, program: Program) =
             subs_body = subs_body.substitute(key, value)
           subs_body.expand(program)
         else:
-          panic &"`{self.`var`}` does not match `{sexpr}` from set `{self.set.name}`."
+          panic &"`{self.`var`}` does not match `{sexpr}` from set `{self.set}`."
   of BlockStatement:
     for statement in self.statements:
       echo statement
@@ -187,7 +187,7 @@ proc parse_program(lexer: var Lexer): Program =
       discard lexer.next
       let name = lexer.parse_symbol()
       if result.sets.has_key(name.name):
-        panic &"Redefinition of set `{name.name}`."
+        panic &"Redefinition of set `{name}`."
       let seq = parse_seq(lexer)
       result.sets[name.name] = seq
     of "case", "for":
@@ -245,7 +245,7 @@ proc usage(app_file: string) =
   stderr.write_line &"Usage: {app_file} <COMMAND> [ARGS]"
   stderr.write_line &"COMMANDS:"
   for command in commands:
-    stderr.write_line &"  {command.name} {command.signature}\t{command.description}"
+    stderr.write_line &"  {command} {command.signature}\t{command.description}"
 
 commands = @[
   Command(
