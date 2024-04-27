@@ -4,14 +4,16 @@ import
   std/sequtils,
   std/options,
   std/enumerate,
-  std/strformat
+  std/strformat,
+  std/strutils
 
 type
   ExprKind* = enum
     ekSymbol,
     ekInteger,
-    ekTuple
-  Expr* = object
+    ekTuple,
+    ekEval
+  Expr* = ref object
     case kind*: ExprKind
     of ekSymbol:
       name*: Symbol
@@ -21,6 +23,16 @@ type
     of ekTuple:
       openParen*: Symbol
       items*: seq[Expr]
+    of ekEval:
+      openBracket*: Symbol
+      lhs*: Expr
+      rhs*: Expr
+
+proc toExpr*(symbol: Symbol): Expr =
+  return Expr(kind: ekSymbol, name: symbol)
+
+proc toExpr*(symbol: Symbol, integer: int): Expr =
+  return Expr(kind: ekInteger, symbol: symbol, value: integer)
 
 proc parseExpr*(lexer: var Lexer): Expr =
   let symbol = lexer.expectSymbol()
@@ -36,14 +48,29 @@ proc parseExpr*(lexer: var Lexer): Expr =
       openParen: symbol,
       items: items,
     )
-  else: return Expr(kind: ekSymbol, name: symbol)
+  of "[":
+    let lhs = lexer.expectSymbol().toExpr()
+    discard lexer.expectSymbol("+")
+    let rhs = lexer.expectSymbol().toExpr()
+    discard lexer.expectSymbol("]")
+    return Expr(
+      kind: ekEval,
+      openBracket: symbol,
+      lhs: lhs,
+      rhs: rhs,
+    )
+  else: 
+    try:
+      return toExpr(symbol, symbol.name.parseInt())
+    except:
+      return toExpr(symbol)
 
 proc `$`*(self: Expr): string =
   case self.kind:
   of ekSymbol:
     return self.name.name
   of ekInteger:
-    return self.symbol.name
+    return $self.value
   of ekTuple:
     var buffer = "("
     for i, item in enumerate(self.items):
@@ -52,20 +79,27 @@ proc `$`*(self: Expr): string =
       else:
         buffer &= &" {item}"
     return buffer & ")"
+  of ekEval:
+    return &"[{self.lhs} + {self.rhs}]"
 
 proc `==`*(self, other: Expr): bool =
   case (self.kind, other.kind)
   of (ekSymbol, ekSymbol):
     return self.name == other.name
+  of (ekInteger, ekInteger):
+    return self.value == other.value
   of (ekTuple, ekTuple):
     if self.items.len != other.items.len: return false
     for (a, b) in self.items.zip(other.items):
       if a != b: return false
     return true
+  of (ekEval, ekEval):
+    return self.lhs == other.lhs and self.rhs == other.rhs
   else: return false
 
 proc symbolName*(self: Expr): Option[Symbol] =
   if self.kind == ekSymbol: return some(self.name)
+  if self.kind == ekInteger: return some(self.symbol)
  
 proc substitute*(self: Expr, `var`: Symbol, expr: Expr): Expr =
   case self.kind
@@ -82,22 +116,17 @@ proc substitute*(self: Expr, `var`: Symbol, expr: Expr): Expr =
   of ekTuple:
     let items = self.items.mapIt(it.substitute(`var`, expr))
     return Expr(kind: ekTuple, openParen: self.openParen, items: items)
+  of ekEval:
+    return Expr(
+      kind: ekEval,
+      openBracket: self.openBracket,
+      lhs: self.lhs.substitute(`var`, expr),
+      rhs: self.rhs.substitute(`var`, expr),
+    )
 
 proc loc*(self: Expr): Location =
   case self.kind
   of ekSymbol: return self.name.loc
   of ekInteger: return self.symbol.loc
   of ekTuple: return self.openParen.loc
-
-proc findSymbol*(self: Expr, symbol: Symbol): Option[Symbol] =
-  case self.kind
-  of ekSymbol:
-    if self.name == symbol:
-      return some(self.name)
-  of ekInteger:
-    if self.symbol == symbol:
-      return some(self.symbol)
-  of ekTuple:
-    for item in self.items:
-      if Some(@name) ?= item.findSymbol(symbol):
-        return some(name)
+  of ekEval: return self.openBracket.loc

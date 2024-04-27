@@ -62,5 +62,7 @@ proc getKey*[A, B](t: Table[A, B], key: A): Option[A] =
     if keyInTable == key: return some(keyInTable)
 
 proc orElse*[T](self: Option[T], `else`: Option[T]): Option[T] =
-  if self.isSome(): return self
-  else: return `else`
+  if self.isNone(): return `else`
+
+proc andThen*[T](self: Option[T], then: Option[T]): Option[T] =
+  if self.isSome(): return then

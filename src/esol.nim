@@ -188,16 +188,32 @@ proc print(self: Machine) =
 proc trace(self: Machine) =
   var buffer = &"{self.state}: "
   var head = 0
+  var lastExpr = Expr()
+  var underline = ""
   for i, expr in enumerate(self.tape):
     if i == self.head:
       head = buffer.len
+      underline = '~'.repeat(len($expr)-1)
     buffer &= &"{expr} "
-  echo &"{buffer}\n{' '.repeat(head)}^"
+  echo &"{buffer}\n{' '.repeat(head)}^{underline}"
 
 proc next(self: var Machine, program: var Program) =
   for statement in program.statements:
     if Some((@write, @action, @next)) ?= statement.matchState(program, self.state, self.tape[self.head]):
-      self.tape[self.head] = write
+      if write.kind == ekEval:
+        if write.lhs.kind == ekInteger:
+          if write.rhs.kind == ekInteger:
+            self.tape[self.head] = Expr(
+              kind: ekInteger,
+              symbol: write.openBracket,
+              value: write.lhs.value + write.rhs.value,
+            )
+          else:
+            panic write.rhs.loc, "Right hand side value must be an integer."
+        else:
+          panic write.lhs.loc, "Left hand side value must be an integer."
+      else:
+        self.tape[self.head] = write
       if Some(@action) ?= action.symbolName():
         case action.name:
           of "<-":
