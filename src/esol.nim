@@ -1,6 +1,6 @@
 import
   ./utils,
-  ./list,
+  ./expr,
   ./lexer,
   std/options,
   fusion/matching,
@@ -19,11 +19,11 @@ type
   Statement = ref object
     case kind: StatementKind
     of skCase:
-      state: List
-      read: List
-      write: List
-      action: List
-      next: List
+      state: Expr
+      read: Expr
+      write: Expr
+      action: Expr
+      next: Expr
     of skVar:
       name: Symbol
       `type`: Symbol
@@ -32,17 +32,17 @@ type
       statements: seq[Statement]
   Run = object
     keyword: Symbol
-    state: List
-    tape: seq[List]
+    state: Expr
+    tape: seq[Expr]
     trace: bool
   Program = object
     statements: seq[Statement]
-    types: Table[Symbol, seq[List]]
+    types: Table[Symbol, seq[Expr]]
     runs: seq[Run]
   Machine = object
-    state: List
-    tape: seq[List]
-    tapeDefault: List
+    state: Expr
+    tape: seq[Expr]
+    tapeDefault: Expr
     head: int
     halt: bool
 
@@ -58,16 +58,16 @@ proc `$`(self: Statement): string =
       result &= &"  {statement}\n"
     result &= "}"
 
-proc substitute(self: Statement, name: Symbol, list: List): Statement =
+proc substitute(self: Statement, name: Symbol, expr: Expr): Statement =
   case self.kind
   of skCase:
     result = Statement(
       kind:  skCase,
-      state:   self.state.substitute(name, list),
-      read:     self.read.substitute(name, list),
-      write:   self.write.substitute(name, list),
-      action: self.action.substitute(name, list),
-      next:     self.next.substitute(name, list),
+      state:   self.state.substitute(name, expr),
+      read:     self.read.substitute(name, expr),
+      write:   self.write.substitute(name, expr),
+      action: self.action.substitute(name, expr),
+      next:     self.next.substitute(name, expr),
     )
   of skVar:
     return Statement(
@@ -75,23 +75,23 @@ proc substitute(self: Statement, name: Symbol, list: List): Statement =
       name: self.name,
       # TODO: allow substituting the types
       `type`:  self.`type`,
-      body:  self.body.substitute(name, list),
+      body:  self.body.substitute(name, expr),
     )
   of skBlock:
     return Statement(
       kind: skBlock,
-      statements: self.statements.mapIt(it.substitute(name, list))
+      statements: self.statements.mapIt(it.substitute(name, expr))
     )
 
-proc matchState(self: Statement, program: var Program, state: List, read: List): Option[(List, List, List)] =
+proc matchState(self: Statement, program: var Program, state: Expr, read: Expr): Option[(Expr, Expr, Expr)] =
   case self.kind
   of skCase:
     if self.state == state and self.read == read:
       return some((self.write, self.action, self.next))
   of skVar:
-    if Some(@lists) ?= program.types.get(self.`type`):
-      for list in lists:
-        if Some(@triple) ?= self.body.substitute(self.name, list).matchState(program, state, read):
+    if Some(@exprs) ?= program.types.get(self.`type`):
+      for expr in exprs:
+        if Some(@triple) ?= self.body.substitute(self.name, expr).matchState(program, state, read):
           return some(triple)
     else:
       panic self.`type`.loc, &"Unknown type `{self.`type`}`."
@@ -104,20 +104,20 @@ proc expand(self: Statement, program: var Program) =
   case self.kind
   of skCase: echo self
   of skVar:
-    if Some(@lists) ?= program.types.get(self.`type`):
-      for list in lists:
-        self.body.substitute(self.name, list).expand(program)
+    if Some(@exprs) ?= program.types.get(self.`type`):
+      for expr in exprs:
+        self.body.substitute(self.name, expr).expand(program)
     else:
       panic self.`type`.loc, &"Unknown type `{self.`type`}`."
   of skBlock:
     for statement in self.statements:
       statement.expand(program)
 
-proc parseSeq(lexer: var Lexer): seq[List] =
+proc parseSeq(lexer: var Lexer): seq[Expr] =
   discard lexer.expectSymbol("{")
   while Some(@symbol) ?= lexer.peek():
     if symbol.name == "}": break
-    result.add(parseList(lexer))
+    result.add(parseExpr(lexer))
   discard lexer.expectSymbol("}")
 
 proc parseStatement(lexer: var Lexer): Statement =
@@ -126,11 +126,11 @@ proc parseStatement(lexer: var Lexer): Statement =
   of "case":
     return Statement(
       kind: skCase,
-      state:  parseList(lexer),
-      read:   parseList(lexer),
-      write:  parseList(lexer),
-      action: parseList(lexer),
-      next:   parseList(lexer),
+      state:  parseExpr(lexer),
+      read:   parseExpr(lexer),
+      write:  parseExpr(lexer),
+      action: parseExpr(lexer),
+      next:   parseExpr(lexer),
     )
   of "var":
     var vars = newSeq[Symbol]()
@@ -164,7 +164,7 @@ proc parseProgram(lexer: var Lexer): Program =
       let keyword = lexer.expectSymbol("run", "trace")
       result.runs.add(Run(
         keyword: keyword,
-        state: parseList(lexer),
+        state: parseExpr(lexer),
         tape: parseSeq(lexer),
         trace: keyword.name == "trace"
       ))
@@ -181,17 +181,17 @@ proc parseProgram(lexer: var Lexer): Program =
       panic key.loc, &"Unknown keyword `{key}`."
 
 proc print(self: Machine) =
-  for list in self.tape:
-    stdout.write &"{list} "
+  for expr in self.tape:
+    stdout.write &"{expr} "
   echo()
 
 proc trace(self: Machine) =
   var buffer = &"{self.state}: "
   var head = 0
-  for i, list in enumerate(self.tape):
+  for i, expr in enumerate(self.tape):
     if i == self.head:
       head = buffer.len
-    buffer &= &"{list} "
+    buffer &= &"{expr} "
   echo &"{buffer}\n{' '.repeat(head)}^"
 
 proc next(self: var Machine, program: var Program) =
@@ -255,8 +255,8 @@ commands = @[
       for i, run in enumerate(program.runs):
         echo &"{run.keyword.loc}: run"
     
-        var tapeDefault: List
-        if Some(@list) ?= run.tape.last(): tapeDefault = list
+        var tapeDefault: Expr
+        if Some(@expr) ?= run.tape.last(): tapeDefault = expr
         else: panic "Tape should not be empty, it must contain at least one symbol to be repeated indefinitely."
 
         var machine = Machine(
@@ -293,8 +293,8 @@ commands = @[
       for run in program.runs:
         let keyword = if run.trace: "trace" else: "run"
         var tape = "{ "
-        for list in run.tape:
-          tape &= &"{list} "
+        for expr in run.tape:
+          tape &= &"{expr} "
         tape &= "}"
         echo &"{keyword} {run.state} {tape}"
   ),
