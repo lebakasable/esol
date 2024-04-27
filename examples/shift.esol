@@ -1,0 +1,17 @@
+type Integer { 1 2 3 4 5 }
+
+trace Entry { & 1 2 3 4 5 & }
+
+case Entry & & -> Pick
+
+var s : Integer {
+	case Pick s s -> (Pick s)
+	case (Pick s) & & <- (Finish s)
+	var _ : Integer case (Finish s) _ s -> Halt
+}
+
+var s t : Integer {
+	case (Pick s) t t <- (Place s t)
+	var _ : Integer case (Place s t) _ t -> (Skip s)
+	case (Skip s) t t -> (Pick s)
+}
