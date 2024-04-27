@@ -187,3 +187,20 @@ proc usesVar*(self: Expr, name: Symbol): Option[Symbol] =
         return some(symbol)
   of ekEval:
     return self.lhs.usesVar(name).orElse(self.rhs.usesVar(name))
+
+proc normalize*(self: Expr): Expr =
+  case self.kind
+  of ekSymbol: return Expr(kind: ekSymbol, name: self.name)
+  of ekInteger: return Expr(kind: ekSymbol, name: self.symbol)
+  of ekTuple:
+    var buffer = "_"
+    for i, item in enumerate(self.items):
+      if i > 0: buffer &= "_"
+      buffer &= $item.normalize()
+    buffer &= "_"
+    return Expr(
+      kind: ekSymbol,
+      name: Symbol(name: buffer, loc: self.openParen.loc)
+    )
+  of ekEval:
+    panic "Normalizing `eval` expressions has not been implemented yet."

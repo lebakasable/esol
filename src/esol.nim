@@ -172,13 +172,41 @@ proc sanityCheck(self: Statement, program: Program, scope: var Table[Symbol, Sym
     for statement in self.statements:
       statement.sanityCheck(program, scope)
 
-proc expand(self: Statement, program: var Program) =
+proc normalize(self: Statement): Statement =
   case self.kind
-  of skCase: echo self
+  of skCase:
+    return Statement(
+      kind:    skCase,
+      keyword: self.keyword,
+      state:   self.state.normalize(),
+      read:     self.read.normalize(),
+      write:   self.write.normalize(),
+      action: self.action.normalize(),
+      next:     self.next.normalize(),
+    )
+  of skVar:
+    return Statement(
+      kind: skVar,
+      `type`: self.`type`,
+      body: self.body.normalize(),
+    )
+  of skBlock:
+    return Statement(
+      kind: skBlock,
+      statements: self.statements.map_it(it.normalize())
+    )
+
+proc expand(self: Statement, program: var Program, normalize = false) =
+  case self.kind
+  of skCase:
+    if normalize:
+      echo self.normalize()
+    else:
+      echo self
   of skVar:
     if Some(@exprs) ?= program.types.get(self.`type`):
       for expr in exprs:
-        self.body.substituteVar(self.name, expr).expand(program)
+        self.body.substituteVar(self.name, expr).expand(program, normalize)
     else:
       case self.`type`.name:
       of "Integer":
@@ -187,7 +215,7 @@ proc expand(self: Statement, program: var Program) =
         panic self.`type`.loc, &"Unknown type `{self.`type`}`."
   of skBlock:
     for statement in self.statements:
-      statement.expand(program)
+      statement.expand(program, normalize)
 
 proc parseSeq(lexer: var Lexer): seq[Expr] =
   discard lexer.expectSymbol("{")
@@ -382,24 +410,34 @@ commands = @[
   Command(
     name: "expand",
     description: "Expands an Esol program.",
-    signature: "<input.esol>",
+    signature: "[--no-expr] <input.esol>",
     run: proc (args: var seq[string]) =
-      var programPath: string
-      if Some(@path) ?= args.shift:
-        programPath = path
-      else:
-        usage(stderr)
-        panic "No program file is provided."
+      var programPath = none(string)
+      var noExpr = false
 
-      let programSource = try: readFile(programPath)
-                           except: panic &"Could not read file `{programPath}`."
-      var lexer = tokenize(programPath, programSource)
+      while Some(@arg) ?= args.shift:
+        case arg
+        of "--no-expr": noExpr = true
+        else:
+          if programPath.isSome():
+            usage(stderr)
+            panic "Interpreting several files is not supported."
+          else:
+            programPath = some(arg)
+
+      if Some(_) ?= programPath: discard else:
+        usage(stderr)
+        panic "No input file is provided."
+
+      let programSource = try: readFile(programPath.get)
+                           except: panic &"Could not read file `{programPath.get}`."
+      var lexer = tokenize(programPath.get, programSource)
       var program = parseProgram(lexer)
 
       program.sanityCheck()
       
       for statement in program.statements:
-        statement.expand(program)
+        statement.expand(program, noExpr)
 
       for run in program.runs:
         run.expand()
