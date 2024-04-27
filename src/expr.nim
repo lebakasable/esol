@@ -11,9 +11,9 @@ import
 
 type
   ExprKind* = enum
-    ekSymbol,
-    ekInteger,
-    ekTuple,
+    ekSymbol
+    ekInteger
+    ekTuple
     ekEval
   Expr* = ref object
     case kind*: ExprKind
