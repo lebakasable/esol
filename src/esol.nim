@@ -276,8 +276,7 @@ commands = @[
       var program = parseProgram(lexer)
 
       setControlCHook(nil)
-
-      for i, run in enumerate(program.runs):
+      for run in program.runs:
         echo &"{run.keyword.loc}: run"
     
         var tapeDefault: Expr
