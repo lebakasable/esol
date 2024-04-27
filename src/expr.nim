@@ -161,7 +161,7 @@ proc patternMatch*(self: Expr, value: Expr, bindings: var Table[Symbol, Expr], s
     of ekTuple:
       if self.items.len != value.items.len: return false
       for (a, b) in self.items.zip(value.items):
-        if not a.patternMatch(b, bindings):
+        if not a.patternMatch(b, bindings, scope):
           return false
       return true
     of ekSymbol, ekInteger, ekEval: return false
@@ -180,7 +180,7 @@ proc usesVar*(self: Expr, name: Symbol): Option[Symbol] =
   of ekSymbol:
     if self.name == name:
       return some(self.name)
-  of ekInteger: return none(Symbol)
+  of ekInteger: return
   of ekTuple:
     for item in self.items:
       if Some(@symbol) ?= item.usesVar(name):
