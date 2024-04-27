@@ -1,5 +1,3 @@
-type Integer { 1 2 3 4 5 }
-
 trace Entry { & 1 2 3 4 5 & }
 
 case Entry & & -> Pick

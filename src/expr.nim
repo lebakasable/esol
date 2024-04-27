@@ -1,11 +1,13 @@
 import
   ./lexer,
+  ./utils,
   fusion/matching,
   std/sequtils,
   std/options,
   std/enumerate,
   std/strformat,
-  std/strutils
+  std/strutils,
+  std/tables
 
 type
   ExprKind* = enum
@@ -101,27 +103,24 @@ proc symbolName*(self: Expr): Option[Symbol] =
   if self.kind == ekSymbol: return some(self.name)
   if self.kind == ekInteger: return some(self.symbol)
  
-proc substitute*(self: Expr, `var`: Symbol, expr: Expr): Expr =
+proc substituteBindings*(self: Expr, bindings: Table[Symbol, Expr]): Expr =
   case self.kind
   of ekSymbol:
-    if self.name == `var`:
+    if Some(@expr) ?= bindings.get(self.name):
       return expr
     else: 
       return self
   of ekInteger:
-    if self.symbol == `var`:
-      return expr
-    else:
-      return self
+    return self
   of ekTuple:
-    let items = self.items.mapIt(it.substitute(`var`, expr))
+    let items = self.items.mapIt(it.substituteBindings(bindings))
     return Expr(kind: ekTuple, openParen: self.openParen, items: items)
   of ekEval:
     return Expr(
       kind: ekEval,
       openBracket: self.openBracket,
-      lhs: self.lhs.substitute(`var`, expr),
-      rhs: self.rhs.substitute(`var`, expr),
+      lhs: self.lhs.substituteBindings(bindings),
+      rhs: self.rhs.substituteBindings(bindings),
     )
 
 proc loc*(self: Expr): Location =
@@ -130,3 +129,61 @@ proc loc*(self: Expr): Location =
   of ekInteger: return self.symbol.loc
   of ekTuple: return self.openParen.loc
   of ekEval: return self.openBracket.loc
+
+proc patternMatch*(self: Expr, value: Expr, bindings: var Table[Symbol, Expr], scope: Option[Table[Symbol, Symbol]] = none(Table[Symbol, Symbol])): bool =
+  case self.kind
+  of ekSymbol:
+    if Some(@scope) ?= scope:
+      if scope.hasKey(self.name):
+        bindings[self.name] = value
+        return true
+      else:
+        case value.kind
+        of ekSymbol: return self.name == value.name
+        of ekInteger, ekTuple, ekEval: return false
+    else:
+      bindings[self.name] = value
+      return true
+  of ekInteger:
+    if Some(@scope) ?= scope:
+      if scope.hasKey(self.symbol):
+        bindings[self.symbol] = value
+        return true
+      else:
+        case value.kind
+        of ekInteger: return self.symbol == value.symbol
+        of ekSymbol, ekTuple, ekEval: return false
+    else:
+      bindings[self.symbol] = value
+      return true
+  of ekTuple:
+    case value.kind
+    of ekTuple:
+      if self.items.len != value.items.len: return false
+      for (a, b) in self.items.zip(value.items):
+        if not a.patternMatch(b, bindings):
+          return false
+      return true
+    of ekSymbol, ekInteger, ekEval: return false
+  of ekEval:
+    case value.kind
+    of ekEval:
+      if not self.lhs.patternMatch(value.lhs, bindings, scope):
+        return false
+      if not self.rhs.patternMatch(value.rhs, bindings, scope):
+        return false
+      return true
+    of ekSymbol, ekInteger, ekTuple: return false
+
+proc usesVar*(self: Expr, name: Symbol): Option[Symbol] =
+  case self.kind
+  of ekSymbol:
+    if self.name == name:
+      return some(self.name)
+  of ekInteger: return none(Symbol)
+  of ekTuple:
+    for item in self.items:
+      if Some(@symbol) ?= item.usesVar(name):
+        return some(symbol)
+  of ekEval:
+    return self.lhs.usesVar(name).orElse(self.rhs.usesVar(name))

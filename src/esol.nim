@@ -19,6 +19,7 @@ type
   Statement = ref object
     case kind: StatementKind
     of skCase:
+      keyword: Symbol
       state: Expr
       read: Expr
       write: Expr
@@ -49,7 +50,7 @@ type
 proc `$`(self: Statement): string =
   case self.kind
   of skCase:
-    return &"case {self.state} {self.read} {self.write} {self.action} {self.next}"
+    return &"{self.keyword} {self.state} {self.read} {self.write} {self.action} {self.next}"
   of skVar:
     return &"var {self.name} : {self.`type`} {self.body}"
   of skBlock:
@@ -58,16 +59,18 @@ proc `$`(self: Statement): string =
       result &= &"  {statement}\n"
     result &= "}"
 
-proc substitute(self: Statement, name: Symbol, expr: Expr): Statement =
+proc substituteVar(self: Statement, name: Symbol, expr: Expr): Statement =
   case self.kind
   of skCase:
+    var bindings = {name: expr}.toTable()
     result = Statement(
       kind:  skCase,
-      state:   self.state.substitute(name, expr),
-      read:     self.read.substitute(name, expr),
-      write:   self.write.substitute(name, expr),
-      action: self.action.substitute(name, expr),
-      next:     self.next.substitute(name, expr),
+      keyword: self.keyword,
+      state:   self.state.substituteBindings(bindings),
+      read:     self.read.substituteBindings(bindings),
+      write:   self.write.substituteBindings(bindings),
+      action: self.action.substituteBindings(bindings),
+      next:     self.next.substituteBindings(bindings),
     )
   of skVar:
     return Statement(
@@ -75,12 +78,12 @@ proc substitute(self: Statement, name: Symbol, expr: Expr): Statement =
       name: self.name,
       # TODO: allow substituting the types
       `type`:  self.`type`,
-      body:  self.body.substitute(name, expr),
+      body:  self.body.substituteVar(name, expr),
     )
   of skBlock:
     return Statement(
       kind: skBlock,
-      statements: self.statements.mapIt(it.substitute(name, expr))
+      statements: self.statements.mapIt(it.substituteVar(name, expr))
     )
 
 proc matchState(self: Statement, program: var Program, state: Expr, read: Expr): Option[(Expr, Expr, Expr)] =
@@ -91,7 +94,7 @@ proc matchState(self: Statement, program: var Program, state: Expr, read: Expr):
   of skVar:
     if Some(@exprs) ?= program.types.get(self.`type`):
       for expr in exprs:
-        if Some(@triple) ?= self.body.substitute(self.name, expr).matchState(program, state, read):
+        if Some(@triple) ?= self.body.substituteVar(self.name, expr).matchState(program, state, read):
           return some(triple)
     else:
       panic self.`type`.loc, &"Unknown type `{self.`type`}`."
@@ -100,15 +103,88 @@ proc matchState(self: Statement, program: var Program, state: Expr, read: Expr):
       if Some(@triple) ?= statement.matchState(program, state, read):
         return some(triple)
 
+proc typeContainsValue(program: Program, `type`: Symbol, value: Expr): bool =
+  if Some(@typeValues) ?= program.types.get(`type`):
+    return typeValues.contains(value)
+  else:
+    case `type`.name
+    of "Integer":
+      if value.kind == ekInteger: return true
+      else: return false
+    else:
+      panic `type`.loc, "Unknown type `{`type`}`."
+
+proc typeCheckCase(self: Statement, program: var Program, state: Expr, read: Expr, scope: var Table[Symbol, Symbol]): Option[(Expr, Expr, Expr)] =
+  case self.kind
+  of skCase:
+    var bindings = initTable[Symbol, Expr]()
+
+    if not self.state.patternMatch(state, bindings, some(scope)):
+      return
+    if not self.read.patternMatch(read, bindings, some(scope)):
+      return
+
+    for name, `type` in scope:
+      let value = bindings[name]
+      if not typeContainsValue(program, `type`, value):
+        return
+    return some((
+      self.write.substituteBindings(bindings),
+      self.action.substituteBindings(bindings),
+      self.next.substituteBindings(bindings),
+    ))
+  of skVar:
+    if Some(@shadowedVar) ?= scope.getKey(self.name):
+      error self.name.loc, &"`{self.name}` shadows another name in the higher scope."
+      note shadowedVar.loc, "The shadowed name is located here."
+      quit(1)
+    scope[self.name] = self.`type`
+    result = self.body.typeCheckCase(program, state, read, scope)
+    scope.del(self.name)
+  of skBlock:
+    for statement in self.statements:
+      if Some(@triple) ?= statement.typeCheckCase(program, state, read, scope):
+        return some(triple)
+
+proc sanityCheck(self: Statement, program: Program, scope: var Table[Symbol, Symbol]) =
+  case self.kind
+  of skCase:
+    var unusedVars = newSeq[Symbol]()
+    for name, `type` in scope:
+      if not (program.types.hasKey(`type`) or `type`.name in ["Integer"]):
+        panic `type`.loc, &"Unknown type `{`type`}`."
+      if self.state.usesVar(name).orElse(self.read.usesVar(name)).isNone():
+        unusedVars.add(name)
+    if unusedVars.len > 0:
+      error self.keyword.loc, "Not all variables in the scope are used in the input of this case."
+      for `var` in unusedVars:
+        note `var`.loc, &"Unused variable `{`var`}`."
+      quit(1)
+  of skVar:
+    if Some(@shadowedVar) ?= scope.getKey(self.name):
+      error self.name.loc, &"`{self.name}` shadows another name in the higher scope."
+      note shadowedVar.loc, "The shadowed name is located here."
+      quit(1)
+    scope[self.name] = self.`type`
+    self.body.sanityCheck(program, scope)
+    scope.del(self.name)
+  of skBlock:
+    for statement in self.statements:
+      statement.sanityCheck(program, scope)
+
 proc expand(self: Statement, program: var Program) =
   case self.kind
   of skCase: echo self
   of skVar:
     if Some(@exprs) ?= program.types.get(self.`type`):
       for expr in exprs:
-        self.body.substitute(self.name, expr).expand(program)
+        self.body.substituteVar(self.name, expr).expand(program)
     else:
-      panic self.`type`.loc, &"Unknown type `{self.`type`}`."
+      case self.`type`.name:
+      of "Integer":
+        panic self.`type`.loc, &"This type can't be expanded as it is too big."
+      else:
+        panic self.`type`.loc, &"Unknown type `{self.`type`}`."
   of skBlock:
     for statement in self.statements:
       statement.expand(program)
@@ -126,11 +202,12 @@ proc parseStatement(lexer: var Lexer): Statement =
   of "case":
     return Statement(
       kind: skCase,
-      state:  parseExpr(lexer),
-      read:   parseExpr(lexer),
-      write:  parseExpr(lexer),
-      action: parseExpr(lexer),
-      next:   parseExpr(lexer),
+      keyword: key,
+      state:   parseExpr(lexer),
+      read:    parseExpr(lexer),
+      write:   parseExpr(lexer),
+      action:  parseExpr(lexer),
+      next:    parseExpr(lexer),
     )
   of "var":
     var vars = newSeq[Symbol]()
@@ -188,6 +265,11 @@ proc expand(self: Run) =
   tape &= "}"
   echo &"{keyword} {self.state} {tape}"
 
+proc sanityCheck(self: Program) =
+  for statement in self.statements:
+    var scope = initTable[Symbol, Symbol]()
+    statement.sanityCheck(self, scope)
+
 proc print(self: Machine) =
   for expr in self.tape:
     stdout.write &"{expr} "
@@ -207,7 +289,8 @@ proc trace(self: Machine) =
 
 proc next(self: var Machine, program: var Program) =
   for statement in program.statements:
-    if Some((@write, @action, @next)) ?= statement.matchState(program, self.state, self.tape[self.head]):
+    var scope = initTable[Symbol, Symbol]()
+    if Some((@write, @action, @next)) ?= statement.typeCheckCase(program, self.state, self.tape[self.head], scope):
       if write.kind == ekEval:
         if write.lhs.kind == ekInteger:
           if write.rhs.kind == ekInteger:
@@ -275,6 +358,8 @@ commands = @[
       var lexer = tokenize(programPath, programSource)
       var program = parseProgram(lexer)
 
+      program.sanityCheck()
+
       setControlCHook(nil)
       for run in program.runs:
         echo &"{run.keyword.loc}: run"
@@ -311,6 +396,8 @@ commands = @[
       var lexer = tokenize(programPath, programSource)
       var program = parseProgram(lexer)
 
+      program.sanityCheck()
+      
       for statement in program.statements:
         statement.expand(program)
 
