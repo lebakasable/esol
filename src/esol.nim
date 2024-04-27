@@ -86,23 +86,6 @@ proc substituteVar(self: Statement, name: Symbol, expr: Expr): Statement =
       statements: self.statements.mapIt(it.substituteVar(name, expr))
     )
 
-proc matchState(self: Statement, program: var Program, state: Expr, read: Expr): Option[(Expr, Expr, Expr)] =
-  case self.kind
-  of skCase:
-    if self.state == state and self.read == read:
-      return some((self.write, self.action, self.next))
-  of skVar:
-    if Some(@exprs) ?= program.types.get(self.`type`):
-      for expr in exprs:
-        if Some(@triple) ?= self.body.substituteVar(self.name, expr).matchState(program, state, read):
-          return some(triple)
-    else:
-      panic self.`type`.loc, &"Unknown type `{self.`type`}`."
-  of skBlock:
-    for statement in self.statements:
-      if Some(@triple) ?= statement.matchState(program, state, read):
-        return some(triple)
-
 proc typeContainsValue(program: Program, `type`: Symbol, value: Expr): bool =
   if Some(@typeValues) ?= program.types.get(`type`):
     return typeValues.contains(value)
@@ -262,7 +245,7 @@ proc parseStatement(lexer: var Lexer): Statement =
       statements: statements,
     )
 
-proc parseProgram(lexer: var Lexer): Program =
+proc parseSource(lexer: var Lexer): Program =
   while Some(@key) ?= lexer.peek():
     case key.name
     of "run", "trace":
@@ -371,20 +354,20 @@ proc usage(file = stdout) =
 commands = @[
   Command(
     name: "run",
-    description: "Runs an Esol program.",
+    description: "Runs an Esol file.",
     signature: "<input.esol>",
     run: proc (args: var seq[string]) =
-      var programPath: string
+      var sourcePath: string
       if Some(@path) ?= args.shift:
-        programPath = path
+        sourcePath = path
       else:
         usage(stderr)
-        panic "No program file is provided."
+        panic "No input file is provided."
 
-      let programSource = try: readFile(programPath)
-                           except: panic &"Could not read file `{programPath}`."
-      var lexer = tokenize(programPath, programSource)
-      var program = parseProgram(lexer)
+      let source = try: readFile(sourcePath)
+                   except: panic &"Could not read file `{sourcePath}`."
+      var lexer = tokenize(sourcePath, source)
+      var program = parseSource(lexer)
 
       program.sanityCheck()
 
@@ -409,30 +392,30 @@ commands = @[
   ),
   Command(
     name: "expand",
-    description: "Expands an Esol program.",
+    description: "Expands an Esol file.",
     signature: "[--no-expr] <input.esol>",
     run: proc (args: var seq[string]) =
-      var programPath = none(string)
+      var sourcePath = none(string)
       var noExpr = false
 
       while Some(@arg) ?= args.shift:
         case arg
         of "--no-expr": noExpr = true
         else:
-          if programPath.isSome():
+          if sourcePath.isSome():
             usage(stderr)
             panic "Interpreting several files is not supported."
           else:
-            programPath = some(arg)
+            sourcePath = some(arg)
 
-      if Some(_) ?= programPath: discard else:
+      if Some(_) ?= sourcePath: discard else:
         usage(stderr)
         panic "No input file is provided."
 
-      let programSource = try: readFile(programPath.get)
-                           except: panic &"Could not read file `{programPath.get}`."
-      var lexer = tokenize(programPath.get, programSource)
-      var program = parseProgram(lexer)
+      let source = try: readFile(sourcePath.get)
+                   except: panic &"Could not read file `{sourcePath.get}`."
+      var lexer = tokenize(sourcePath.get, source)
+      var program = parseSource(lexer)
 
       program.sanityCheck()
       
@@ -444,19 +427,19 @@ commands = @[
   ),
   Command(
     name: "lex",
-    description: "Lexes an Esol program.",
+    description: "Lexes an Esol file.",
     signature: "<input.esol>",
     run: proc (args: var seq[string]) =
-      var programPath: string
+      var sourcePath: string
       if Some(@path) ?= args.shift:
-        programPath = path
+        sourcePath = path
       else:
         usage(stderr)
-        panic "No program file is provided."
+        panic "No input file is provided."
 
-      let programSource = try: readFile(programPath)
-                           except: panic &"Could not read file `{programPath}`."
-      var lexer = tokenize(programPath, programSource)
+      let source = try: readFile(sourcePath)
+                   except: panic &"Could not read file `{sourcePath}`."
+      var lexer = tokenize(sourcePath, source)
 
       for symbol in lexer.symbols:
         echo &"{symbol.loc}: {symbol.name}"
