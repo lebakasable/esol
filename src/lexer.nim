@@ -8,6 +8,9 @@ import
   std/strformat,
   std/hashes
 
+const SPECIAL = (['(', '{', '['],
+                 [')', '}', ']', ':'])
+  
 type
   Location* = object
     filePath*: string
@@ -37,11 +40,11 @@ proc tokenize*(filePath: string, source: string): Lexer =
         var word = word
         loc.col += lastWordLen
   
-        if word.len > 1 and word[0] in ['(', '{', ':']:
+        if word.len > 1 and word[0] in SPECIAL[0]:
           result.symbols.add(Symbol(name: $word[0], loc: loc))
           discard word.shift()
           loc.col += 1
-        if word.len > 1 and word[word.len-1] in [')', '}', ':']:
+        if word.len > 1 and word[word.len-1] in SPECIAL[1]:
           result.symbols.add(Symbol(name: word[0..word.len-2], loc: loc))
           word = $word[word.len-1]
           loc.col += word.len
