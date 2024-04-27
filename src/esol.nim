@@ -268,11 +268,14 @@ proc parseSource(lexer: var Lexer): Program =
     else:
       panic key.loc, &"Unknown keyword `{key}`."
 
-proc expand(self: Run) =
+proc expand(self: Run, normalize = false) =
   let keyword = if self.trace: "trace" else: "run"
   var tape = "{ "
   for expr in self.tape:
-    tape &= &"{expr} "
+    if normalize:
+      tape &= &"{expr.normalize()} "
+    else:
+      tape &= &"{expr} "
   tape &= "}"
   echo &"{keyword} {self.state} {tape}"
 
@@ -423,7 +426,7 @@ commands = @[
         statement.expand(program, noExpr)
 
       for run in program.runs:
-        run.expand()
+        run.expand(noExpr)
   ),
   Command(
     name: "lex",
