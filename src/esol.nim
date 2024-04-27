@@ -222,27 +222,28 @@ type Command = object
   name: string
   description: string
   signature: string
-  run: proc (appFile: string, args: var seq[string])
+  run: proc (args: var seq[string])
 
+var appFile = "esol"
 var commands = newSeq[Command]()
   
-proc usage(appFile: string) =
-  stderr.writeLine &"Usage: {appFile} <COMMAND> [ARGS]"
-  stderr.writeLine &"COMMANDS:"
+proc usage(file = stdout) =
+  file.writeLine &"Usage: {appFile} <COMMAND> [ARGS]"
+  file.writeLine &"COMMANDS:"
   for command in commands:
-    stderr.writeLine &"  {command} {command.signature}\t{command.description}"
+    file.writeLine &"  {command.name} {command.signature}\t{command.description}"
 
 commands = @[
   Command(
     name: "run",
     description: "Runs an Esol program.",
     signature: "<input.esol>",
-    run: proc (appFile: string, args: var seq[string]) =
+    run: proc (args: var seq[string]) =
       var programPath: string
       if Some(@path) ?= args.shift:
         programPath = path
       else:
-        usage(appFile)
+        usage(stderr)
         panic "No program file is provided."
 
       let programSource = try: readFile(programPath)
@@ -274,12 +275,12 @@ commands = @[
     name: "expand",
     description: "Expands an Esol program.",
     signature: "<input.esol>",
-    run: proc (appFile: string, args: var seq[string]) =
+    run: proc (args: var seq[string]) =
       var programPath: string
       if Some(@path) ?= args.shift:
         programPath = path
       else:
-        usage(appFile)
+        usage(stderr)
         panic "No program file is provided."
 
       let programSource = try: readFile(programPath)
@@ -302,12 +303,12 @@ commands = @[
     name: "lex",
     description: "Lexes an Esol program.",
     signature: "<input.esol>",
-    run: proc (appFile: string, args: var seq[string]) =
+    run: proc (args: var seq[string]) =
       var programPath: string
       if Some(@path) ?= args.shift:
         programPath = path
       else:
-        usage(appFile)
+        usage(stderr)
         panic "No program file is provided."
 
       let programSource = try: readFile(programPath)
@@ -316,23 +317,30 @@ commands = @[
 
       for symbol in lexer.symbols:
         echo &"{symbol.loc}: {symbol.name}"
+  ),
+  Command(
+    name: "help",
+    description: "Prints this help message.",
+    signature: "         ",
+    run: proc (args: var seq[string]) =
+      usage()
   )
 ]
   
 proc main() =
   var args = commandLineParams()
-  let appFile = getAppFilename()
+  appFile = getAppFilename()
 
   var command: string
   if Some(@name) ?= args.shift:
     command = name
   else:
-    usage(appFile)
+    usage(stderr)
     panic "No command is provided."
 
   let matchedCommand = commands.filterIt(it.name == command)
   if matchedCommand.len > 0:
-    matchedCommand[0].run(appFile, args)
+    matchedCommand[0].run(args)
   else:
     panic &"Unknown command `{command}`."
 
