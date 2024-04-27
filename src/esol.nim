@@ -193,7 +193,7 @@ proc expand(self: Statement, program: var Program, normalize = false) =
     else:
       case self.`type`.name:
       of "Integer":
-        panic self.`type`.loc, &"This type can't be expanded as it is too big."
+        panic self.`type`.loc, &"The type `{self.`type`}` can't be expanded as it is too big."
       else:
         panic self.`type`.loc, &"Unknown type `{self.`type`}`."
   of skBlock:
