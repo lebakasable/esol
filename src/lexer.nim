@@ -5,7 +5,8 @@ import
   std/enumerate,
   fusion/matching,
   std/streams,
-  std/strformat
+  std/strformat,
+  std/hashes
 
 type
   Location* = object
@@ -22,6 +23,7 @@ type
 proc `$`*(self: Location): string = &"{self.filePath}:{self.row}:{self.col}"
 proc `$`*(self: Symbol): string = self.name
 proc `==`*(self, other: Symbol): bool = self.name == other.name
+proc hash*(self: Symbol): Hash = self.name.hash()
 
 proc tokenize*(filePath: string, source: string): Lexer =
   var loc = Location(filePath: filePath, row: 1, col: 1)

@@ -59,7 +59,7 @@ proc `==`*(self: List, other: List): bool =
     return true
   else: return false
 
-proc atomName*(self: List): Option[Symbol] =
+proc symbolName*(self: List): Option[Symbol] =
   if self.kind == lkSymbol: return some(self.name)
  
 proc substitute*(self: List, `var`: Symbol, list: List): List =
@@ -72,22 +72,18 @@ proc substitute*(self: List, `var`: Symbol, list: List): List =
   of lkList:
     let items = self.items.mapIt(it.substitute(`var`, list))
     return List(kind: lkList, openParen: self.openParen, items: items)
-    
-proc patternMatch*(self: List, value: List, bindings: var Table[Symbol, List]): bool =
-  result = true
-  case (self.kind, value.kind)
-  of (lkSymbol, _):
-    bindings[self.name] = value
-  of (lkList, lkList):
-    if self.items.len == value.items.len:
-      for (a, b) in self.items.zip(value.items):
-        if not a.patternMatch(b, bindings):
-          result = false
-    else:
-      result = false
-  else: result = false
 
 proc loc*(self: List): Location =
   case self.kind
   of lkSymbol: return self.name.loc
   of lkList: return self.openParen.loc
+
+proc findSymbol*(self: List, symbol: Symbol): Option[Symbol] =
+  case self.kind
+  of lkSymbol:
+    if self.name == symbol:
+      return some(self.name)
+  of lkList:
+    for item in self.items:
+      if Some(@name) ?= item.findSymbol(symbol):
+        return some(name)

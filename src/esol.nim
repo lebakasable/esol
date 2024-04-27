@@ -14,7 +14,7 @@ import
 type
   StatementKind = enum
     skCase
-    skFor
+    skVar
     skBlock
   Statement = ref object
     case kind: StatementKind
@@ -24,10 +24,9 @@ type
       write: List
       action: List
       next: List
-    of skFor:
-      `var`: List
-      # TODO: support list for `set`
-      set: Symbol
+    of skVar:
+      name: Symbol
+      `type`: Symbol
       body: Statement
     of skBlock:
       statements: seq[Statement]
@@ -38,7 +37,7 @@ type
     trace: bool
   Program = object
     statements: seq[Statement]
-    sets: Table[string, seq[List]]
+    types: Table[Symbol, seq[List]]
     runs: seq[Run]
   Machine = object
     state: List
@@ -51,37 +50,37 @@ proc `$`(self: Statement): string =
   case self.kind
   of skCase:
     return &"case {self.state} {self.read} {self.write} {self.action} {self.next}"
-  of skFor:
-    return &"for {self.`var`} : {self.set} {self.body}"
+  of skVar:
+    return &"var {self.name} : {self.`type`} {self.body}"
   of skBlock:
     result = "{\n"
     for statement in self.statements:
       result &= &"  {statement}\n"
     result &= "}"
 
-proc substitute(self: Statement, `var`: Symbol, list: List): Statement =
+proc substitute(self: Statement, name: Symbol, list: List): Statement =
   case self.kind
   of skCase:
     result = Statement(
       kind:  skCase,
-      state:   self.state.substitute(`var`, list),
-      read:     self.read.substitute(`var`, list),
-      write:   self.write.substitute(`var`, list),
-      action: self.action.substitute(`var`, list),
-      next:     self.next.substitute(`var`, list),
+      state:   self.state.substitute(name, list),
+      read:     self.read.substitute(name, list),
+      write:   self.write.substitute(name, list),
+      action: self.action.substitute(name, list),
+      next:     self.next.substitute(name, list),
     )
-  of skFor:
+  of skVar:
     return Statement(
-      kind: skFor,
-      `var`: self.`var`,
-      # TODO: allow substituting the sets
-      set:   self.set,
-      body:  self.body.substitute(`var`, list),
+      kind: skVar,
+      name: self.name,
+      # TODO: allow substituting the types
+      `type`:  self.`type`,
+      body:  self.body.substitute(name, list),
     )
   of skBlock:
     return Statement(
       kind: skBlock,
-      statements: self.statements.mapIt(it.substitute(`var`, list))
+      statements: self.statements.mapIt(it.substitute(name, list))
     )
 
 proc matchState(self: Statement, program: var Program, state: List, read: List): Option[(List, List, List)] =
@@ -89,21 +88,13 @@ proc matchState(self: Statement, program: var Program, state: List, read: List):
   of skCase:
     if self.state == state and self.read == read:
       return some((self.write, self.action, self.next))
-  of skFor:
-    if Some(@lists) ?= program.sets.get(self.set.name):
+  of skVar:
+    if Some(@lists) ?= program.types.get(self.`type`):
       for list in lists:
-        var bindings = initTable[Symbol, List]()
-        if self.`var`.patternMatch(list, bindings):
-          var subsBody = self.body
-          for key, value in bindings:
-            subsBody = subsBody.substitute(key, value)
-          if Some(@triple) ?= subsBody.matchState(program, state, read):
-            return some(triple)
-        else:
-          error self.`var`.loc, &"`{self.`var`}` does not match `{list}` from set `{self.set}`."
-          info list.loc, "The matched value is located here."
+        if Some(@triple) ?= self.body.substitute(self.name, list).matchState(program, state, read):
+          return some(triple)
     else:
-      panic self.set.loc, &"Unknown set `{self.set}`."
+      panic self.`type`.loc, &"Unknown type `{self.`type`}`."
   of skBlock:
     for statement in self.statements:
       if Some(@triple) ?= statement.matchState(program, state, read):
@@ -112,21 +103,15 @@ proc matchState(self: Statement, program: var Program, state: List, read: List):
 proc expand(self: Statement, program: var Program) =
   case self.kind
   of skCase: echo self
-  of skFor:
-    if Some(@lists) ?= program.sets.get(self.set.name):
+  of skVar:
+    if Some(@lists) ?= program.types.get(self.`type`):
       for list in lists:
-        var bindings = initTable[Symbol, List]()
-        if self.`var`.patternMatch(list, bindings):
-          var subsBody = self.body
-          for key, value in bindings:
-            subsBody = subsBody.substitute(key, value)
-          subsBody.expand(program)
-        else:
-          error self.`var`.loc, &"`{self.`var`}` does not match `{list}` from set `{self.set}`."
-          info list.loc, "The matched value is located here."
+        self.body.substitute(self.name, list).expand(program)
+    else:
+      panic self.`type`.loc, &"Unknown type `{self.`type`}`."
   of skBlock:
     for statement in self.statements:
-      echo statement
+      statement.expand(program)
 
 proc parseSeq(lexer: var Lexer): seq[List] =
   discard lexer.expectSymbol("{")
@@ -136,7 +121,7 @@ proc parseSeq(lexer: var Lexer): seq[List] =
   discard lexer.expectSymbol("}")
 
 proc parseStatement(lexer: var Lexer): Statement =
-  let key = lexer.expectSymbol("case", "for", "{")
+  let key = lexer.expectSymbol("case", "var", "{")
   case key.name
   of "case":
     return Statement(
@@ -147,19 +132,19 @@ proc parseStatement(lexer: var Lexer): Statement =
       action: parseList(lexer),
       next:   parseList(lexer),
     )
-  of "for":
-    var vars = newSeq[List]()
+  of "var":
+    var vars = newSeq[Symbol]()
     while Some(@symbol) ?= lexer.peek():
       if symbol.name == ":": break
-      vars.add(parseList(lexer))
+      vars.add(lexer.expectSymbol())
     discard lexer.expectSymbol(":")
-    let set = lexer.expectSymbol()
+    let `type` = lexer.expectSymbol()
     result = parseStatement(lexer)
     for i in countdown(vars.len - 1, 0):
       result = Statement(
-        kind: skFor,
-        `var`: vars[i],
-        set: set,
+        kind: skVar,
+        name: vars[i],
+        `type`: `type`,
         body: result)
   of "{":
     var statements = newSeq[Statement]()
@@ -183,14 +168,14 @@ proc parseProgram(lexer: var Lexer): Program =
         tape: parseSeq(lexer),
         trace: keyword.name == "trace"
       ))
-    of "set":
+    of "type":
       discard lexer.next
       let name = lexer.expectSymbol()
-      if result.sets.hasKey(name.name):
-        panic name.loc, &"Redefinition of set `{name}`."
+      if result.types.hasKey(name):
+        panic name.loc, &"Redefinition of type `{name}`."
       let seq = parseSeq(lexer)
-      result.sets[name.name] = seq
-    of "case", "for":
+      result.types[name] = seq
+    of "case", "var":
       result.statements.add(parseStatement(lexer))
     else:
       panic key.loc, &"Unknown keyword `{key}`."
@@ -213,7 +198,7 @@ proc next(self: var Machine, program: var Program) =
   for statement in program.statements:
     if Some((@write, @action, @next)) ?= statement.matchState(program, self.state, self.tape[self.head]):
       self.tape[self.head] = write
-      if Some(@action) ?= action.atomName:
+      if Some(@action) ?= action.symbolName():
         case action.name:
           of "<-":
             if self.head == 0:
@@ -268,7 +253,7 @@ commands = @[
       setControlCHook(nil)
 
       for i, run in enumerate(program.runs):
-        if i > 0: echo "-".repeat(20)
+        echo &"{run.keyword.loc}: run"
     
         var tapeDefault: List
         if Some(@list) ?= run.tape.last(): tapeDefault = list
@@ -278,8 +263,6 @@ commands = @[
           state: run.state,
           tape: run.tape,
           tapeDefault: tapeDefault,
-          head: 0,
-          halt: false,
         )
 
         while not machine.halt:

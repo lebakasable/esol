@@ -1,5 +1,6 @@
 import
   std/options,
+  fusion/matching,
   std/tables
 
 template info*(message: string) =
@@ -12,7 +13,13 @@ template note*(message: string) =
   stderr.writeLine("NOTE: ", message)
 
 template note*(loc: untyped, message: string) =
-  stderr.writeLine(loc, ": note: ", message)
+  stderr.writeLine(loc, ": NOTE: ", message)
+
+template warn*(message: string) =
+  stderr.writeLine("WARNING: ", message)
+
+template warn*(loc: untyped, message: string) =
+  stderr.writeLine(loc, ": WARNING: ", message)
 
 template error*(message: string) =
   stderr.writeLine("ERROR: ", message)
@@ -46,6 +53,14 @@ proc shift*(s: var string): Option[char] =
     result = some(s[0])
     s = s[1..s.len-1]
 
-proc get*[A, B](t: var Table[A, B], key: A): Option[B] =
+proc get*[A, B](t: Table[A, B], key: A): Option[B] =
   if t.contains(key):
     return some(t[key])
+
+proc getKey*[A, B](t: Table[A, B], key: A): Option[A] =
+  for keyInTable in t.keys:
+    if keyInTable == key: return some(keyInTable)
+
+proc orElse*[T](self: Option[T], `else`: Option[T]): Option[T] =
+  if self.isSome(): return self
+  else: return `else`
