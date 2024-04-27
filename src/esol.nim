@@ -180,6 +180,14 @@ proc parseProgram(lexer: var Lexer): Program =
     else:
       panic key.loc, &"Unknown keyword `{key}`."
 
+proc expand(self: Run) =
+  let keyword = if self.trace: "trace" else: "run"
+  var tape = "{ "
+  for expr in self.tape:
+    tape &= &"{expr} "
+  tape &= "}"
+  echo &"{keyword} {self.state} {tape}"
+
 proc print(self: Machine) =
   for expr in self.tape:
     stdout.write &"{expr} "
@@ -308,12 +316,7 @@ commands = @[
         statement.expand(program)
 
       for run in program.runs:
-        let keyword = if run.trace: "trace" else: "run"
-        var tape = "{ "
-        for expr in run.tape:
-          tape &= &"{expr} "
-        tape &= "}"
-        echo &"{keyword} {run.state} {tape}"
+        run.expand()
   ),
   Command(
     name: "lex",
