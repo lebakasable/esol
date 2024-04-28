@@ -54,7 +54,18 @@ type
     halt: bool
 
 proc elements(self: TypeExpr, types: Table[Symbol, TypeExpr]): HashSet[Expr] =
-  panic "todo"
+  case self.kind
+  of tekNamed:
+    if Some(@typeExpr) ?= types.get(self.name):
+      return elements(typeExpr, types)
+    else:
+      panic self.name.loc, &"Unknown type `{self.name}`."
+  of tekAnonymous:
+    return self.elements
+  of tekInteger:
+    panic self.symbol.loc, &"The type `{self.symbol}` can't be expanded as it is too big."
+  of tekUnion, tekDiff:
+    return elements(self.lhs, types) + elements(self.rhs, types)
     
 proc contains(self: TypeExpr, element: Expr, types: Table[Symbol, TypeExpr]): bool =
   case self.kind
@@ -68,73 +79,9 @@ proc contains(self: TypeExpr, element: Expr, types: Table[Symbol, TypeExpr]): bo
   of tekUnion: return self.lhs.contains(element, types) or self.rhs.contains(element, types)
   of tekDiff: return self.lhs.contains(element, types) and not self.rhs.contains(element, types)
 
-proc containsInteger(self: TypeExpr, types: Table[Symbol, TypeExpr]): bool =
-  panic "todo"
-  
-proc intersects*(self, other: TypeExpr, types: Table[Symbol, TypeExpr]): bool =
-  case self.kind
-  of tekNamed:
-    if Some(@innerType) ?= types.get(self.name):
-      return innerType.intersects(other, types)
-    else:
-      panic self.name.loc, "Unknown type `{self.name}`."
-  of tekAnonymous:
-    for element in self.elements:
-      if other.contains(element, types):
-        return true
-    return false
-  of tekInteger:
-    return other.containsInteger(types)
-  of tekUnion:
-    return self.lhs.intersects(other, types) or self.rhs.intersects(other, types)
-  of tekDiff:
-    panic "todo"
-    
-proc intersects*(self, other: Expr, selfScope, otherScope: Table[Symbol, TypeExpr], types: Table[Symbol, TypeExpr]): bool =
-  case self.kind
-  of ekAtom:
-    case other.kind
-    of ekAtom:
-      case (self.atom.asVar(selfScope), other.atom.asVar(otherScope))
-      of (Some(@selfType), Some(@otherType)):
-        return selfType.intersects(otherType, types)
-      of (Some(@selfType), None()):
-        return selfType.contains(other, types)
-      of (None(), Some(@otherType)):
-        return otherType.contains(self, types)
-      of (None(), None()): return self == other
-    of ekTuple: return false
-    of ekEval:
-      panic other.openBracket.loc, "Eval expressions are not allowed in the cases input."
-  of ekTuple:
-    case other.kind
-    of ekTuple:
-      if self.items.len == other.items.len:
-        for (a, b) in self.items.zip(other.items):
-          if a.intersects(b, selfScope, otherScope, types):
-            return true
-        return false
-      else:
-        return false
-    of ekEval:
-      panic other.openBracket.loc, "Eval expressions are not allowed in the cases input."
-    of ekAtom: return false
-  of ekEval:
-    panic self.openBracket.loc, "Eval expressions are not allowed in the cases input."
-    
-proc intersects(self, other: ScopedCase, types: Table[Symbol, TypeExpr]): bool =
-  self.`case`.state.intersects(other.`case`.state, self.scope, other.scope, types) and
-  self.`case`.read.intersects(other.`case`.read, self.scope, other.scope, types)
+proc `$`(self: Case): string =
+  &"{self.keyword} {self.state} {self.read} {self.write} {self.action} {self.next}"
 
-proc checkUnreachableCases(scopedCases: seq[ScopedCase], types: Table[Symbol, TypeExpr]) =
-  for i in 0..<scopedCases.len:
-    for j in i+1..<scopedCases.len:
-      let (a, b) = (scopedCases[i], scopedCases[j])
-      if a.intersects(b, types):
-        error b.`case`.keyword.loc, "Case overlaps with another case defined before."
-        note a.`case`.keyword.loc, "The overlap happens with this case."
-        quit(1)
-  
 proc substituteVar(self: Case, name: Symbol, expr: Expr): Case =
   var bindings = {name: expr}.toTable()
   return Case(
@@ -158,8 +105,8 @@ proc normalize(self: Case): Case =
 
 proc expand(self: ScopedCase, types: Table[Symbol, TypeExpr],  normalize = false) =
   for name, `type` in self.scope:
-    for expr in elements(`type`, types):
-      let `case` = self.`case`.substituteVar(name, expr)
+    for typeExpr in elements(`type`, types):
+      let `case` = self.`case`.substituteVar(name, typeExpr)
       if normalize:
         echo `case`.normalize()
       else:
@@ -181,7 +128,7 @@ proc typeCheckNextCase(self: ScopedCase, types: Table[Symbol, TypeExpr], state: 
 proc `$`(self: Statement): string =
   case self.kind
   of skCase:
-    return &"{self.`case`.keyword} {self.`case`.state} {self.`case`.read} {self.`case`.write} {self.`case`.action} {self.`case`.next}"
+    return $self.`case`
   of skVar:
     return &"var {self.name} : {self.`type`} {self.body}"
   of skBlock:
@@ -385,8 +332,6 @@ commands = @[
       var scopedCases = compileCasesFromStatements(types, statements)
       var program = Program(scopedCases: scopedCases, types: types, runs: runs)
 
-      #checkUnreachableCases(scopedCases, types)
-      
       setControlCHook(nil)
       for run in program.runs:
         echo &"{run.keyword.loc}: run"
@@ -433,8 +378,6 @@ commands = @[
       var lexer = tokenize(sourcePath.get, source)
       var (statements, types, runs) = parseSource(lexer)
       var scopedCases = compileCasesFromStatements(types, statements)
-
-      #checkUnreachableCases(scopedCases, types)
 
       for `case` in scopedCases:
         `case`.expand(types, noExpr)
