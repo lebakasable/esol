@@ -62,25 +62,25 @@ proc asVar*(self: Atom, scope: Table[Symbol, TypeExpr]): Option[TypeExpr] =
 proc expectSymbol*(self: Atom): Symbol =
   case self.kind
   of akSymbol: return self.symbol
-  of akInteger: panic self.symbol.loc, "Expected symbol but got integer `{self.value}`."
+  of akInteger: panic self.symbol.loc, &"Expected symbol but got integer `{self.value}`."
 
 proc expectInteger*(self: Atom): int =
   case self.kind
   of akInteger: return self.value
-  of akSymbol: panic self.symbol.loc, "Expected integer but got symbol `{self.symbol}`."
+  of akSymbol: panic self.symbol.loc, &"Expected integer but got symbol `{self.symbol}`."
 
 proc expectAtom*(self: Expr): Atom =
   case self.kind
   of ekAtom: return self.atom
-  of ekTuple: panic self.openParen.loc, "Expected atom but got tuple `{self}`."
-  of ekEval: panic self.openBracket.loc, "Expected atom but got eval expression `{self}`."
+  of ekTuple: panic self.openParen.loc, &"Expected atom but got tuple `{self}`."
+  of ekEval: panic self.openBracket.loc, &"Expected atom but got eval expression `{self}`."
 
 proc expectBool*(self: Symbol): bool =
   case self.name
   of "true": return true
   of "false": return false
   else:
-    panic self.loc, "Expected boolean but got symbol `{self.name}`."
+    panic self.loc, &"Expected boolean but got symbol `{self.name}`."
 
 proc atomFromSymbol*(symbol: Symbol): Atom =
   try:
