@@ -9,7 +9,8 @@ import
   std/tables,
   std/strformat,
   std/strutils,
-  std/sequtils
+  std/sequtils,
+  std/sets
 
 type
   Case = object
@@ -43,7 +44,7 @@ type
     trace: bool
   Program = object
     scopedCases: seq[ScopedCase]
-    types: Table[Symbol, seq[Expr]]
+    types: Table[Symbol, HashSet[Expr]]
     runs: seq[Run]
   Machine = object
     state: Expr
@@ -52,35 +53,99 @@ type
     head: int
     halt: bool
 
-proc typeContainsValue(types: Table[Symbol, seq[Expr]], `type`: Symbol, value: Expr): bool =
+proc typeContainsValue(types: Table[Symbol, HashSet[Expr]], `type`: Symbol, value: Expr): bool =
   if Some(@typeValues) ?= types.get(`type`):
     return typeValues.contains(value)
   else:
     case `type`.name
     of "Integer":
-      if value.kind == ekInteger: return true
+      if value.kind == ekAtom and value.atom.kind == akInteger: return true
       else: return false
     else:
       panic `type`.loc, "Unknown type `{`type`}`."
 
-proc typeCheckNextCase(self: ScopedCase, types: Table[Symbol, seq[Expr]], state: Expr, read: Expr): Option[(Expr, Expr, Expr)] =
+proc typeCheckNextCase(self: ScopedCase, types: Table[Symbol, HashSet[Expr]], state: Expr, read: Expr): Option[(Expr, Expr, Expr)] =
   var bindings = initTable[Symbol, Expr]()
+  if self.`case`.state.patternMatch(state, bindings, self.scope) and self.`case`.read.patternMatch(read, bindings, self.scope):
+    for name, `type` in self.scope:
+      let value = bindings[name]
+      if not typeContainsValue(types, `type`, value):
+        return
+    return some((
+      self.`case`.write.substituteBindings(bindings),
+      self.`case`.action.substituteBindings(bindings),
+      self.`case`.next.substituteBindings(bindings),
+    ))
 
-  if not self.`case`.state.patternMatch(state, bindings, self.scope):
-    return
-  if not self.`case`.read.patternMatch(read, bindings, self.scope):
-    return
+proc intersects*(selfType, otherType: Symbol, types: Table[Symbol, HashSet[Expr]]): bool =
+  if selfType == otherType: return true
+  
+  if selfType.name == "Integer":
+    for element in types[otherType]:
+      if element.kind == ekAtom and element.atom.kind == akInteger:
+        return true
+    return false
+    
+  if otherType.name == "Integer":
+    for element in types[selfType]:
+      if element.kind == ekAtom and element.atom.kind == akInteger:
+        return true
+    return false
 
-  for name, `type` in self.scope:
-    let value = bindings[name]
-    if not typeContainsValue(types, `type`, value):
-      return
-  return some((
-    self.`case`.write.substituteBindings(bindings),
-    self.`case`.action.substituteBindings(bindings),
-    self.`case`.next.substituteBindings(bindings),
-  ))
+  return types[selfType].intersection(types[otherType]).len > 0
+      
+proc intersects*(self, other: Expr, selfScope, otherScope: Table[Symbol, Symbol], types: Table[Symbol, HashSet[Expr]]): bool =
+  case self.kind
+  of ekAtom:
+    case other.kind
+    of ekAtom:
+      case (self.atom.asVar(selfScope), other.atom.asVar(otherScope))
+      of (Some(@selfType), Some(@otherType)):
+        return selfType.intersects(otherType, types)
+      of (Some(@selfType), None()):
+        case selfType.name
+        of "Integer":
+          if other.atom.kind == akInteger: return true
+          else: return false
+        else:
+          return types[selfType].contains(other)
+      of (None(), Some(@otherType)):
+        case otherType.name
+        of "Integer":
+          if self.atom.kind == akInteger: return true
+          else: return false
+        else:
+          return types[otherType].contains(self)
+      of (None(), None()): return self == other
+    of ekTuple: return false
+    of ekEval:
+      panic other.openBracket.loc, "Eval expressions are not allowed in the cases input."
+  of ekTuple:
+    case other.kind
+    of ekTuple:
+      if self.items.len == other.items.len:
+        return self.items.zip(other.items).allIt(it[0].intersects(it[1], selfScope, otherScope, types))
+      else:
+        return false
+    of ekEval:
+      panic other.openBracket.loc, "Eval expressions are not allowed in the cases input."
+    of ekAtom: return false
+  of ekEval:
+    panic self.openBracket.loc, "Eval expressions are not allowed in the cases input."
+    
+proc intersects(self, other: ScopedCase, types: Table[Symbol, HashSet[Expr]]): bool =
+  self.`case`.state.intersects(other.`case`.state, self.scope, other.scope, types) and
+  self.`case`.read.intersects(other.`case`.read, self.scope, other.scope, types)
 
+proc checkUnreachableCases(scopedCases: seq[ScopeCase], types: Table[Symbol, HashSet[Expr]]) =
+  for i in 0..<scopedCases.len:
+    for j in i+1..<scopedCases.len:
+      let (a, b) = (scopedCases[i], scopedCases[j])
+      if a.intersects(b, types):
+        error b.`case`.keyword.loc, "Case overlaps with another case defined before."
+        note a.`case`.keyword.loc, "The overlap happens with this case."
+        quit(1)
+  
 proc substituteVar(self: Case, name: Symbol, expr: Expr): Case =
   var bindings = {name: expr}.toTable()
   return Case(
@@ -102,7 +167,7 @@ proc normalize(self: Case): Case =
     next:    self.next.normalize(),
   )
 
-proc expand(self: ScopedCase, types: Table[Symbol, seq[Expr]],  normalize = false) =
+proc expand(self: ScopedCase, types: Table[Symbol, HashSet[Expr]],  normalize = false) =
   for name, `type` in self.scope:
     if Some(@exprs) ?= types.get(`type`):
       for expr in exprs:
@@ -130,7 +195,7 @@ proc `$`(self: Statement): string =
       result &= &"  {statement}\n"
     result &= "}"
 
-proc compileToCases(self: Statement, types: Table[Symbol, seq[Expr]], scope: var Table[Symbol, Symbol], scopedCases: var seq[ScopedCase]) =
+proc compileToCases(self: Statement, types: Table[Symbol, HashSet[Expr]], scope: var Table[Symbol, Symbol], scopedCases: var seq[ScopedCase]) =
   case self.kind
   of skCase:
     var unusedVars = newSeq[Symbol]()
@@ -201,7 +266,7 @@ proc parseStatement(lexer: var Lexer): Statement =
       statements: statements,
     )
 
-proc parseSource(lexer: var Lexer): (seq[Statement], Table[Symbol, seq[Expr]], seq[Run]) =
+proc parseSource(lexer: var Lexer): (seq[Statement], Table[Symbol, HashSet[Expr]], seq[Run]) =
   while Some(@key) ?= lexer.peek():
     case key.name
     of "run", "trace":
@@ -218,13 +283,13 @@ proc parseSource(lexer: var Lexer): (seq[Statement], Table[Symbol, seq[Expr]], s
       if result[1].hasKey(name):
         panic name.loc, &"Redefinition of type `{name}`."
       let seq = parseSeq(lexer)
-      result[1][name] = seq
+      result[1][name] = seq.toHashSet
     of "case", "var":
       result[0].add(parseStatement(lexer))
     else:
       panic key.loc, &"Unknown keyword `{key}`."
 
-proc compileCasesFromStatements(types: Table[Symbol, seq[Expr]], statements: seq[Statement]): seq[ScopedCase] =
+proc compileCasesFromStatements(types: Table[Symbol, HashSet[Expr]], statements: seq[Statement]): seq[ScopedCase] =
   for statement in statements:
     var scope = initTable[Symbol, Symbol]()
     statement.compileToCases(types, scope, result)
@@ -260,20 +325,20 @@ proc next(self: var Machine, program: var Program) =
   for `case` in program.scopedCases:
     if Some((@write, @action, @next)) ?= `case`.typeCheckNextCase(program.types, self.state, self.tape[self.head]):
       if write.kind == ekEval:
-        if write.lhs.kind == ekInteger:
-          if write.rhs.kind == ekInteger:
-            self.tape[self.head] = Expr(
-              kind: ekInteger,
+        if write.lhs.kind == ekAtom and write.lhs.atom.kind == akInteger:
+          if write.rhs.kind == ekAtom and write.rhs.atom.kind == akInteger:
+            self.tape[self.head] = Expr(kind: ekAtom, atom: Atom(
+              kind: akInteger,
               symbol: write.openBracket,
-              value: write.lhs.value + write.rhs.value,
-            )
+              value: write.lhs.atom.value + write.rhs.atom.value,
+            ))
           else:
             panic write.rhs.loc, "Right hand side value must be an integer."
         else:
           panic write.lhs.loc, "Left hand side value must be an integer."
       else:
         self.tape[self.head] = write
-      if Some(@action) ?= action.symbolName():
+      if Some(@action) ?= action.atomSymbol():
         case action.name:
           of "<-":
             if self.head == 0:
@@ -328,6 +393,8 @@ commands = @[
       var scopedCases = compileCasesFromStatements(types, statements)
       var program = Program(scopedCases: scopedCases, types: types, runs: runs)
 
+      checkUnreachableCases(scopedCases, types)
+      
       setControlCHook(nil)
       for run in program.runs:
         echo &"{run.keyword.loc}: run"
@@ -374,7 +441,9 @@ commands = @[
       var lexer = tokenize(sourcePath.get, source)
       var (statements, types, runs) = parseSource(lexer)
       var scopedCases = compileCasesFromStatements(types, statements)
-      
+
+      checkUnreachableCases(scopedCases, types)
+
       for `case` in scopedCases:
         `case`.expand(types, noExpr)
 

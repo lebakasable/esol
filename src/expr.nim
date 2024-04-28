@@ -7,21 +7,27 @@ import
   std/enumerate,
   std/strformat,
   std/strutils,
-  std/tables
+  std/tables,
+  std/hashes
 
 type
+  AtomKind* = enum
+    akSymbol
+    akInteger
+  Atom* = object
+    symbol*: Symbol
+    case kind*: AtomKind
+    of akSymbol: discard
+    of akInteger:
+      value*: int
   ExprKind* = enum
-    ekSymbol
-    ekInteger
+    ekAtom
     ekTuple
     ekEval
   Expr* = ref object
     case kind*: ExprKind
-    of ekSymbol:
-      name*: Symbol
-    of ekInteger:
-      value*: int
-      symbol*: Symbol
+    of ekAtom:
+      atom*: Atom
     of ekTuple:
       openParen*: Symbol
       items*: seq[Expr]
@@ -30,11 +36,15 @@ type
       lhs*: Expr
       rhs*: Expr
 
+proc asVar*(self: Atom, scope: Table[Symbol, Symbol]): Option[Symbol] =
+  if self.kind == akSymbol:
+    return scope.get(self.symbol)
+
 proc toExpr*(symbol: Symbol): Expr =
-  return Expr(kind: ekSymbol, name: symbol)
+  return Expr(kind: ekAtom, atom: Atom(kind: akSymbol, symbol: symbol))
 
 proc toExpr*(symbol: Symbol, integer: int): Expr =
-  return Expr(kind: ekInteger, symbol: symbol, value: integer)
+  return Expr(kind: ekAtom, atom: Atom(kind: akInteger, symbol: symbol, value: integer))
 
 proc parseExpr*(lexer: var Lexer): Expr =
   let symbol = lexer.expectSymbol()
@@ -69,10 +79,10 @@ proc parseExpr*(lexer: var Lexer): Expr =
 
 proc `$`*(self: Expr): string =
   case self.kind:
-  of ekSymbol:
-    return self.name.name
-  of ekInteger:
-    return $self.value
+  of ekAtom:
+    case self.atom.kind
+    of akSymbol: return self.atom.symbol.name
+    of akInteger: return $self.atom.value
   of ekTuple:
     var buffer = "("
     for i, item in enumerate(self.items):
@@ -86,10 +96,8 @@ proc `$`*(self: Expr): string =
 
 proc `==`*(self, other: Expr): bool =
   case (self.kind, other.kind)
-  of (ekSymbol, ekSymbol):
-    return self.name == other.name
-  of (ekInteger, ekInteger):
-    return self.value == other.value
+  of (ekAtom, ekAtom):
+    return self.atom.symbol == other.atom.symbol
   of (ekTuple, ekTuple):
     if self.items.len != other.items.len: return false
     for (a, b) in self.items.zip(other.items):
@@ -99,19 +107,23 @@ proc `==`*(self, other: Expr): bool =
     return self.lhs == other.lhs and self.rhs == other.rhs
   else: return false
 
-proc symbolName*(self: Expr): Option[Symbol] =
-  if self.kind == ekSymbol: return some(self.name)
-  if self.kind == ekInteger: return some(self.symbol)
+proc hash*(self: Expr): Hash = hash($self)
+
+proc atomSymbol*(self: Expr): Option[Symbol] =
+  if self.kind == ekAtom:
+    return some(self.atom.symbol)
  
 proc substituteBindings*(self: Expr, bindings: Table[Symbol, Expr]): Expr =
   case self.kind
-  of ekSymbol:
-    if Some(@expr) ?= bindings.get(self.name):
-      return expr
-    else: 
+  of ekAtom:
+    case self.atom.kind
+    of akSymbol:
+      if Some(@expr) ?= bindings.get(self.atom.symbol):
+        return expr
+      else: 
+        return self
+    of akInteger:
       return self
-  of ekInteger:
-    return self
   of ekTuple:
     let items = self.items.mapIt(it.substituteBindings(bindings))
     return Expr(kind: ekTuple, openParen: self.openParen, items: items)
@@ -125,29 +137,21 @@ proc substituteBindings*(self: Expr, bindings: Table[Symbol, Expr]): Expr =
 
 proc loc*(self: Expr): Location =
   case self.kind
-  of ekSymbol: return self.name.loc
-  of ekInteger: return self.symbol.loc
+  of ekAtom: return self.atom.symbol.loc
   of ekTuple: return self.openParen.loc
   of ekEval: return self.openBracket.loc
 
 proc patternMatch*(self: Expr, value: Expr, bindings: var Table[Symbol, Expr], scope: Table[Symbol, Symbol]): bool =
   case self.kind
-  of ekSymbol:
-    if scope.hasKey(self.name):
-      bindings[self.name] = value
-      return true
-    else:
-      case value.kind
-      of ekSymbol: return self.name == value.name
-      of ekInteger, ekTuple, ekEval: return false
-  of ekInteger:
-    if scope.hasKey(self.symbol):
-      bindings[self.symbol] = value
-      return true
-    else:
-      case value.kind
-      of ekInteger: return self.symbol == value.symbol
-      of ekSymbol, ekTuple, ekEval: return false
+  of ekAtom:
+    case self.atom.kind
+    of akSymbol:
+      if scope.hasKey(self.atom.symbol):
+        bindings[self.atom.symbol] = value
+        return true
+      else:
+        return self == value
+    of akInteger: return self == value
   of ekTuple:
     case value.kind
     of ekTuple:
@@ -156,7 +160,7 @@ proc patternMatch*(self: Expr, value: Expr, bindings: var Table[Symbol, Expr], s
         if not a.patternMatch(b, bindings, scope):
           return false
       return true
-    of ekSymbol, ekInteger, ekEval: return false
+    of ekAtom, ekEval: return false
   of ekEval:
     case value.kind
     of ekEval:
@@ -165,14 +169,16 @@ proc patternMatch*(self: Expr, value: Expr, bindings: var Table[Symbol, Expr], s
       if not self.rhs.patternMatch(value.rhs, bindings, scope):
         return false
       return true
-    of ekSymbol, ekInteger, ekTuple: return false
+    of ekAtom, ekTuple: return false
 
 proc usesVar*(self: Expr, name: Symbol): Option[Symbol] =
   case self.kind
-  of ekSymbol:
-    if self.name == name:
-      return some(self.name)
-  of ekInteger: return
+  of ekAtom:
+    case self.atom.kind
+    of akSymbol:
+      if self.atom.symbol == name:
+        return some(self.atom.symbol)
+    of akInteger: return
   of ekTuple:
     for item in self.items:
       if Some(@symbol) ?= item.usesVar(name):
@@ -182,17 +188,16 @@ proc usesVar*(self: Expr, name: Symbol): Option[Symbol] =
 
 proc normalize*(self: Expr): Expr =
   case self.kind
-  of ekSymbol: return Expr(kind: ekSymbol, name: self.name)
-  of ekInteger: return Expr(kind: ekSymbol, name: self.symbol)
+  of ekAtom: return self
   of ekTuple:
     var buffer = "_"
     for i, item in enumerate(self.items):
       if i > 0: buffer &= "_"
       buffer &= $item.normalize()
     buffer &= "_"
-    return Expr(
-      kind: ekSymbol,
-      name: Symbol(name: buffer, loc: self.openParen.loc)
-    )
+    return Expr(kind: ekAtom, atom: Atom(
+      kind: akSymbol,
+      symbol: Symbol(name: buffer, loc: self.openParen.loc),
+    ))
   of ekEval:
     panic "Normalizing `eval` expressions has not been implemented yet."
