@@ -8,8 +8,7 @@ import
   std/strformat,
   std/strutils,
   std/tables,
-  std/hashes,
-  std/sets
+  std/hashes
 
 type
   AtomKind* = enum
@@ -37,57 +36,38 @@ type
       lhs*: Expr
       op*: Expr
       rhs*: Expr
-  TypeExprKind* = enum
-    tekNamed
-    tekAnonymous
-    tekInteger
-    tekUnion
-    tekDiff
-  TypeExpr* = ref object
-    case kind*: TypeExprKind
-    of tekNamed:
-      name*: Symbol
-    of tekAnonymous:
-      elements*: HashSet[Expr]
-    of tekInteger:
-      symbol*: Symbol
-    of tekUnion, tekDiff:
-      lhs*: TypeExpr
-      rhs*: TypeExpr
-      
-proc asVar*(self: Atom, scope: Table[Symbol, TypeExpr]): Option[TypeExpr] =
-  if self.kind == akSymbol:
-    return scope.get(self.symbol)
+ 
+proc `$`*(self: Expr): string =
+  case self.kind:
+  of ekAtom:
+    case self.atom.kind
+    of akSymbol: return self.atom.symbol.name
+    of akInteger: return $self.atom.value
+  of ekTuple:
+    var buffer = "("
+    for i, item in enumerate(self.items):
+      if i == 0:
+        buffer &= &"{item}"
+      else:
+        buffer &= &" {item}"
+    return buffer & ")"
+  of ekEval:
+    return &"[{self.lhs} {self.op} {self.rhs}]"
 
-proc expectSymbol*(self: Atom): Symbol =
-  case self.kind
-  of akSymbol: return self.symbol
-  of akInteger: panic self.symbol.loc, &"Expected symbol but got integer `{self.value}`."
+proc `==`*(self, other: Expr): bool =
+  case (self.kind, other.kind)
+  of (ekAtom, ekAtom):
+    return self.atom.symbol == other.atom.symbol
+  of (ekTuple, ekTuple):
+    if self.items.len != other.items.len: return false
+    for (a, b) in self.items.zip(other.items):
+      if a != b: return false
+    return true
+  of (ekEval, ekEval):
+    return self.lhs == other.lhs and self.rhs == other.rhs
+  else: return false
 
-proc expectInteger*(self: Atom): int =
-  case self.kind
-  of akInteger: return self.value
-  of akSymbol: panic self.symbol.loc, &"Expected integer but got symbol `{self.symbol}`."
-
-proc expectBool*(self: Symbol): bool =
-  case self.name
-  of "true": return true
-  of "false": return false
-  else:
-    panic self.loc, &"Expected boolean but got symbol `{self.name}`."
-
-proc atomFromSymbol*(symbol: Symbol): Atom =
-  try:
-    return Atom(kind: akInteger, symbol: symbol, value: symbol.name.parseInt)
-  except:
-    return Atom(kind: akSymbol, symbol: symbol)
-
-proc exprFromSymbol*(symbol: Symbol): Expr =
-  return Expr(kind: ekAtom, atom: atomFromSymbol(symbol))
-
-proc asSymbol*(self: Expr): Option[Symbol] =
-  if self.kind == ekAtom:
-    return some(self.atom.symbol)
+proc hash*(self: Expr): Hash = hash($self)
 
 proc toExpr*(symbol: Symbol): Expr =
   return Expr(kind: ekAtom, atom: Atom(kind: akSymbol, symbol: symbol))
@@ -127,43 +107,47 @@ proc parseExpr*(lexer: var Lexer): Expr =
     except:
       return toExpr(symbol)
 
-proc `$`*(self: Expr): string =
-  case self.kind:
-  of ekAtom:
-    case self.atom.kind
-    of akSymbol: return self.atom.symbol.name
-    of akInteger: return $self.atom.value
-  of ekTuple:
-    var buffer = "("
-    for i, item in enumerate(self.items):
-      if i == 0:
-        buffer &= &"{item}"
-      else:
-        buffer &= &" {item}"
-    return buffer & ")"
-  of ekEval:
-    return &"[{self.lhs} {self.op} {self.rhs}]"
+proc atomFromSymbol*(symbol: Symbol): Atom =
+  try:
+    return Atom(kind: akInteger, symbol: symbol, value: symbol.name.parseInt)
+  except:
+    return Atom(kind: akSymbol, symbol: symbol)
 
-proc `==`*(self, other: Expr): bool =
-  case (self.kind, other.kind)
-  of (ekAtom, ekAtom):
-    return self.atom.symbol == other.atom.symbol
-  of (ekTuple, ekTuple):
-    if self.items.len != other.items.len: return false
-    for (a, b) in self.items.zip(other.items):
-      if a != b: return false
-    return true
-  of (ekEval, ekEval):
-    return self.lhs == other.lhs and self.rhs == other.rhs
-  else: return false
-
-proc hash*(self: Expr): Hash = hash($self)
+import ./typeexpr
 
 proc expectAtom*(self: Expr): Atom =
   case self.kind
   of ekAtom: return self.atom
   of ekTuple: panic self.openParen.loc, &"Expected atom but got tuple `{self}`."
   of ekEval: panic self.openBracket.loc, &"Expected atom but got eval expression `{self}`."
+
+proc expectSymbol*(self: Atom): Symbol =
+  case self.kind
+  of akSymbol: return self.symbol
+  of akInteger: panic self.symbol.loc, &"Expected symbol but got integer `{self.value}`."
+
+proc expectInteger*(self: Atom): int =
+  case self.kind
+  of akInteger: return self.value
+  of akSymbol: panic self.symbol.loc, &"Expected integer but got symbol `{self.symbol}`."
+
+proc expectBool*(self: Symbol): bool =
+  case self.name
+  of "true": return true
+  of "false": return false
+  else:
+    panic self.loc, &"Expected boolean but got symbol `{self.name}`."
+
+proc asVar*(self: Atom, scope: Table[Symbol, TypeExpr]): Option[TypeExpr] =
+  if self.kind == akSymbol:
+    return scope.get(self.symbol)
+
+proc exprFromSymbol*(symbol: Symbol): Expr =
+  return Expr(kind: ekAtom, atom: atomFromSymbol(symbol))
+
+proc asSymbol*(self: Expr): Option[Symbol] =
+  if self.kind == ekAtom:
+    return some(self.atom.symbol)
  
 proc substituteBindings*(self: Expr, bindings: Table[Symbol, Expr]): Expr =
   case self.kind
@@ -254,52 +238,6 @@ proc normalize*(self: Expr): Expr =
     ))
   of ekEval:
     panic "Normalizing `eval` expressions has not been implemented yet."
-
-proc `$`*(self: TypeExpr): string =
-  case self.kind
-  of tekNamed: return self.name.name
-  of tekAnonymous:
-    var buffer = "{"
-    for element in self.elements:
-      buffer &= &" {element}"
-    return buffer & " }"
-  of tekInteger: return "Integer"
-  of tekUnion: return &"{self.lhs} + {self.rhs}"
-  of tekDiff: return &"{self.lhs} - {self.rhs}"
-
-proc parseTypeExpr*(lexer: var Lexer): TypeExpr =
-  let symbol = lexer.expect()
-  var lhs: TypeExpr
-  case symbol.name
-  of "{":
-    var elements = newSeq[Expr]()
-    while Some(@symbol) ?= lexer.peek():
-      if symbol.name == "}": break
-      elements.add(parseExpr(lexer))
-    discard lexer.expect("}")
-    lhs = TypeExpr(kind: tekAnonymous, elements: elements.toHashSet())
-  else:
-    let atom = atomFromSymbol(symbol)
-    case atom.kind
-    of akSymbol:
-      case atom.symbol.name
-      of "Integer":
-        lhs = TypeExpr(kind: tekInteger, symbol: atom.symbol)
-      else:
-        lhs = TypeExpr(kind: tekNamed, name: atom.symbol)
-    of akInteger:
-      panic atom.symbol.loc, "Integer is not a type expression."
-  if Some(@symbol) ?= lexer.peek():
-    case symbol.name
-    of "+":
-      discard lexer.next()
-      return TypeExpr(kind: tekUnion, lhs: lhs, rhs: parseTypeExpr(lexer))
-    of "-":
-      discard lexer.next()
-      return TypeExpr(kind: tekDiff, lhs: lhs, rhs: parseTypeExpr(lexer))
-    else: return lhs
-  else:
-      return lhs
 
 proc eval*(self: Expr): Expr =
   case self.kind

@@ -1,6 +1,7 @@
 import
   ./utils,
   ./expr,
+  ./typeexpr,
   ./lexer,
   std/options,
   fusion/matching,
@@ -52,32 +53,6 @@ type
     tapeDefault: Expr
     head: int
     halt: bool
-
-proc elements(self: TypeExpr, types: Table[Symbol, TypeExpr]): HashSet[Expr] =
-  case self.kind
-  of tekNamed:
-    if Some(@typeExpr) ?= types.get(self.name):
-      return elements(typeExpr, types)
-    else:
-      panic self.name.loc, &"Unknown type `{self.name}`."
-  of tekAnonymous:
-    return self.elements
-  of tekInteger:
-    panic self.symbol.loc, &"The type `{self.symbol}` can't be expanded as it is too big."
-  of tekUnion, tekDiff:
-    return elements(self.lhs, types) + elements(self.rhs, types)
-    
-proc contains(self: TypeExpr, element: Expr, types: Table[Symbol, TypeExpr]): bool =
-  case self.kind
-  of tekNamed:
-    if Some(@typeExpr) ?= types.get(self.name):
-      return typeExpr.contains(element, types)
-    else:
-      panic self.name.loc, &"The type `{self.name}` is not defined."
-  of tekAnonymous: return self.elements.contains(element)
-  of tekInteger: return element.kind == ekAtom and element.atom.kind == akInteger
-  of tekUnion: return self.lhs.contains(element, types) or self.rhs.contains(element, types)
-  of tekDiff: return self.lhs.contains(element, types) and not self.rhs.contains(element, types)
 
 proc `$`(self: Case): string =
   &"{self.keyword} {self.state} {self.read} {self.write} {self.action} {self.next}"
