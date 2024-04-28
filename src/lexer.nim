@@ -52,9 +52,9 @@ proc tokenize*(filePath: string, source: string): Lexer =
             loc.col += 1
 
           var toAdd = newSeq[Symbol]()
-          var lastCol = loc.col
+          var lastLoc = loc
           while word.len > 1 and word[word.len-1] in SPECIAL[1]:
-            toAdd.add(Symbol(name: $word[word.len-1], loc: Location(filePath: filePath, row: loc.row, col: lastCol+word.len-1)))
+            toAdd.add(Symbol(name: $word[word.len-1], loc: Location(filePath: filePath, row: loc.row, col: lastLoc.col+word.len-1)))
             word = $word[0..word.len-2]
             loc.col += 1
 
