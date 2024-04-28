@@ -8,7 +8,8 @@ import
   std/strformat,
   std/strutils,
   std/tables,
-  std/hashes
+  std/hashes,
+  std/sets
 
 type
   AtomKind* = enum
@@ -35,10 +36,37 @@ type
       openBracket*: Symbol
       lhs*: Expr
       rhs*: Expr
-
-proc asVar*(self: Atom, scope: Table[Symbol, Symbol]): Option[Symbol] =
+  TypeExprKind* = enum
+    tekNamed
+    tekAnonymous
+    tekInteger
+    tekUnion
+    tekDiff
+  TypeExpr* = ref object
+    case kind*: TypeExprKind
+    of tekNamed:
+      name*: Symbol
+    of tekAnonymous:
+      elements*: HashSet[Expr]
+    of tekInteger:
+      symbol*: Symbol
+    of tekUnion, tekDiff:
+      lhs*: TypeExpr
+      rhs*: TypeExpr
+      
+proc asVar*(self: Atom, scope: Table[Symbol, TypeExpr]): Option[TypeExpr] =
   if self.kind == akSymbol:
     return scope.get(self.symbol)
+
+proc fromSymbol*(symbol: Symbol): Atom =
+  try:
+    return Atom(kind: akInteger, symbol: symbol, value: symbol.name.parseInt)
+  except:
+    return Atom(kind: akSymbol, symbol: symbol)
+
+proc asSymbol*(self: Expr): Option[Symbol] =
+  if self.kind == ekAtom:
+    return some(self.atom.symbol)
 
 proc toExpr*(symbol: Symbol): Expr =
   return Expr(kind: ekAtom, atom: Atom(kind: akSymbol, symbol: symbol))
@@ -108,10 +136,6 @@ proc `==`*(self, other: Expr): bool =
   else: return false
 
 proc hash*(self: Expr): Hash = hash($self)
-
-proc atomSymbol*(self: Expr): Option[Symbol] =
-  if self.kind == ekAtom:
-    return some(self.atom.symbol)
  
 proc substituteBindings*(self: Expr, bindings: Table[Symbol, Expr]): Expr =
   case self.kind
@@ -141,7 +165,7 @@ proc loc*(self: Expr): Location =
   of ekTuple: return self.openParen.loc
   of ekEval: return self.openBracket.loc
 
-proc patternMatch*(self: Expr, value: Expr, bindings: var Table[Symbol, Expr], scope: Table[Symbol, Symbol]): bool =
+proc patternMatch*(self: Expr, value: Expr, bindings: var Table[Symbol, Expr], scope: Table[Symbol, TypeExpr]): bool =
   case self.kind
   of ekAtom:
     case self.atom.kind
@@ -201,3 +225,49 @@ proc normalize*(self: Expr): Expr =
     ))
   of ekEval:
     panic "Normalizing `eval` expressions has not been implemented yet."
+
+proc `$`*(self: TypeExpr): string =
+  case self.kind
+  of tekNamed: return self.name.name
+  of tekAnonymous:
+    var buffer = "{"
+    for element in self.elements:
+      buffer &= &" {element}"
+    return buffer & " }"
+  of tekInteger: return "Integer"
+  of tekUnion: return &"{self.lhs} + {self.rhs}"
+  of tekDiff: return &"{self.lhs} - {self.rhs}"
+
+proc parseTypeExpr*(lexer: var Lexer): TypeExpr =
+  let symbol = lexer.expectSymbol()
+  var lhs: TypeExpr
+  case symbol.name
+  of "{":
+    var elements = newSeq[Expr]()
+    while Some(@symbol) ?= lexer.peek():
+      if symbol.name == "}": break
+      elements.add(parseExpr(lexer))
+    discard lexer.expectSymbol("}")
+    lhs = TypeExpr(kind: tekAnonymous, elements: elements.toHashSet())
+  else:
+    let atom = fromSymbol(symbol)
+    case atom.kind
+    of akSymbol:
+      case atom.symbol.name
+      of "Integer":
+        lhs = TypeExpr(kind: tekInteger, symbol: atom.symbol)
+      else:
+        lhs = TypeExpr(kind: tekNamed, name: atom.symbol)
+    of akInteger:
+      panic atom.symbol.loc, "Integer is not a type expression."
+  if Some(@symbol) ?= lexer.peek():
+    case symbol.name
+    of "+":
+      discard lexer.next()
+      return TypeExpr(kind: tekUnion, lhs: lhs, rhs: parseTypeExpr(lexer))
+    of "-":
+      discard lexer.next()
+      return TypeExpr(kind: tekDiff, lhs: lhs, rhs: parseTypeExpr(lexer))
+    else: return lhs
+  else:
+      return lhs
