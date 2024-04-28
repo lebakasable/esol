@@ -8,8 +8,8 @@ import
   std/strformat,
   std/hashes
 
-const SPECIAL = (['(', '{', '['],
-                 [')', '}', ']', ':'])
+const SPECIAL = (['(', '{', '[',      '.'],
+                 [')', '}', ']', ':', '.'])
   
 type
   Location* = object
@@ -34,23 +34,38 @@ proc tokenize*(filePath: string, source: string): Lexer =
 
   let lines = source.splitLines()
   for line in lines:
+    var line = line
     if not line.startsWith("//"):
-      let words = line.splitWhitespace()
+      while line.len > 0 and line[0].isSpaceAscii():
+        discard line.shift()
+        loc.col += 1
+
+      let words = line.split()
       for word in words:
         var word = word
-        loc.col += lastWordLen
-  
-        if word.len > 1 and word[0] in SPECIAL[0]:
-          result.symbols.add(Symbol(name: $word[0], loc: loc))
-          discard word.shift()
-          loc.col += 1
-        if word.len > 1 and word[word.len-1] in SPECIAL[1]:
-          result.symbols.add(Symbol(name: word[0..word.len-2], loc: loc))
-          word = $word[word.len-1]
-          loc.col += word.len
+        if word.len > 0:
+          loc.col += lastWordLen
+    
+          while word.len > 1 and word[0] in SPECIAL[0]:
+            result.symbols.add(Symbol(name: $word[0], loc: loc))
+            discard word.shift()
+            loc.col += 1
 
-        result.symbols.add(Symbol(name: word, loc: loc))
-        lastWordLen = word.len + 1
+          var toAdd = newSeq[Symbol]()
+          var lastCol = loc.col
+          while word.len > 1 and word[word.len-1] in SPECIAL[1]:
+            toAdd.add(Symbol(name: $word[word.len-1], loc: Location(filePath: filePath, row: loc.row, col: lastCol+word.len-1)))
+            word = $word[0..word.len-2]
+            loc.col += 1
+
+          result.symbols.add(Symbol(name: word, loc: lastLoc))
+          lastWordLen = word.len + 1
+
+          if toAdd.len > 0:
+            for i in countdown(toAdd.len-1, 0):
+              result.symbols.add(toAdd[i])
+        else:
+          loc.col += 1
     loc.row += 1
     loc.col = 0
     lastWordLen = 1
