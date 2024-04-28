@@ -1,0 +1,14 @@
+run (Entry 0 0) { . }
+
+var i acc : Integer {
+  case (Entry i acc) ... (Check i [i < 1000] acc)
+
+  case (Check i true  acc) ... (Add i [[[i % 3] == 0] || [[i % 5] == 0]] acc)
+  case (Check i false acc) ... (Over acc)
+
+  case (Add i true acc) ... (Entry [i + 1] [acc + i])
+  case (Add i false acc) ... (Entry [i + 1] acc)
+}
+
+var acc : Integer
+case (Over acc) . acc ! Halt
