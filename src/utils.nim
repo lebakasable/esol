@@ -1,7 +1,8 @@
 import
   std/options,
   fusion/matching,
-  std/tables
+  std/tables,
+  std/unicode
 
 template info*(message: string) =
   stderr.writeLine("INFO: ", message)
@@ -64,3 +65,8 @@ proc getKey*[A, B](t: Table[A, B], key: A): Option[A] =
 proc orElse*[T](self: Option[T], `else`: Option[T]): Option[T] =
   if self.isSome(): return self
   else: return `else`
+
+proc utf8Len*(s: string): int =
+  for rune in s.toRunes:
+    if rune.size > 2: result += 2
+    else: result += 1

@@ -130,32 +130,24 @@ proc loc*(self: Expr): Location =
   of ekTuple: return self.openParen.loc
   of ekEval: return self.openBracket.loc
 
-proc patternMatch*(self: Expr, value: Expr, bindings: var Table[Symbol, Expr], scope: Option[Table[Symbol, Symbol]] = none(Table[Symbol, Symbol])): bool =
+proc patternMatch*(self: Expr, value: Expr, bindings: var Table[Symbol, Expr], scope: Table[Symbol, Symbol]): bool =
   case self.kind
   of ekSymbol:
-    if Some(@scope) ?= scope:
-      if scope.hasKey(self.name):
-        bindings[self.name] = value
-        return true
-      else:
-        case value.kind
-        of ekSymbol: return self.name == value.name
-        of ekInteger, ekTuple, ekEval: return false
-    else:
+    if scope.hasKey(self.name):
       bindings[self.name] = value
       return true
-  of ekInteger:
-    if Some(@scope) ?= scope:
-      if scope.hasKey(self.symbol):
-        bindings[self.symbol] = value
-        return true
-      else:
-        case value.kind
-        of ekInteger: return self.symbol == value.symbol
-        of ekSymbol, ekTuple, ekEval: return false
     else:
+      case value.kind
+      of ekSymbol: return self.name == value.name
+      of ekInteger, ekTuple, ekEval: return false
+  of ekInteger:
+    if scope.hasKey(self.symbol):
       bindings[self.symbol] = value
       return true
+    else:
+      case value.kind
+      of ekInteger: return self.symbol == value.symbol
+      of ekSymbol, ekTuple, ekEval: return false
   of ekTuple:
     case value.kind
     of ekTuple:

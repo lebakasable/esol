@@ -84,4 +84,4 @@ proc expectSymbol*(self: var Lexer, expectedNames: varargs[string]): Symbol =
         buffer.write ", or `", name, "`"
       else:
         buffer.write ", `", name, "`"
-    panic self.loc, "Expected {buffer.data} but got `{symbol}`."
+    panic self.loc, &"Expected {buffer.data} but got `{symbol}`."

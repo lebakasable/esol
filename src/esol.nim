@@ -12,6 +12,16 @@ import
   std/sequtils
 
 type
+  Case = object
+    keyword: Symbol
+    state: Expr
+    read: Expr
+    write: Expr
+    action: Expr
+    next: Expr
+  ScopedCase = object
+    `case`: Case
+    scope: Table[Symbol, Symbol]
   StatementKind = enum
     skCase
     skVar
@@ -19,12 +29,7 @@ type
   Statement = ref object
     case kind: StatementKind
     of skCase:
-      keyword: Symbol
-      state: Expr
-      read: Expr
-      write: Expr
-      action: Expr
-      next: Expr
+      `case`: Case
     of skVar:
       name: Symbol
       `type`: Symbol
@@ -37,7 +42,7 @@ type
     tape: seq[Expr]
     trace: bool
   Program = object
-    statements: seq[Statement]
+    scopedCases: seq[ScopedCase]
     types: Table[Symbol, seq[Expr]]
     runs: seq[Run]
   Machine = object
@@ -47,47 +52,8 @@ type
     head: int
     halt: bool
 
-proc `$`(self: Statement): string =
-  case self.kind
-  of skCase:
-    return &"{self.keyword} {self.state} {self.read} {self.write} {self.action} {self.next}"
-  of skVar:
-    return &"var {self.name} : {self.`type`} {self.body}"
-  of skBlock:
-    result = "{\n"
-    for statement in self.statements:
-      result &= &"  {statement}\n"
-    result &= "}"
-
-proc substituteVar(self: Statement, name: Symbol, expr: Expr): Statement =
-  case self.kind
-  of skCase:
-    var bindings = {name: expr}.toTable()
-    result = Statement(
-      kind:  skCase,
-      keyword: self.keyword,
-      state:   self.state.substituteBindings(bindings),
-      read:     self.read.substituteBindings(bindings),
-      write:   self.write.substituteBindings(bindings),
-      action: self.action.substituteBindings(bindings),
-      next:     self.next.substituteBindings(bindings),
-    )
-  of skVar:
-    return Statement(
-      kind: skVar,
-      name: self.name,
-      # TODO: allow substituting the types
-      `type`:  self.`type`,
-      body:  self.body.substituteVar(name, expr),
-    )
-  of skBlock:
-    return Statement(
-      kind: skBlock,
-      statements: self.statements.mapIt(it.substituteVar(name, expr))
-    )
-
-proc typeContainsValue(program: Program, `type`: Symbol, value: Expr): bool =
-  if Some(@typeValues) ?= program.types.get(`type`):
+proc typeContainsValue(types: Table[Symbol, seq[Expr]], `type`: Symbol, value: Expr): bool =
+  if Some(@typeValues) ?= types.get(`type`):
     return typeValues.contains(value)
   else:
     case `type`.name
@@ -97,108 +63,99 @@ proc typeContainsValue(program: Program, `type`: Symbol, value: Expr): bool =
     else:
       panic `type`.loc, "Unknown type `{`type`}`."
 
-proc typeCheckCase(self: Statement, program: var Program, state: Expr, read: Expr, scope: var Table[Symbol, Symbol]): Option[(Expr, Expr, Expr)] =
+proc typeCheckNextCase(self: ScopedCase, types: Table[Symbol, seq[Expr]], state: Expr, read: Expr): Option[(Expr, Expr, Expr)] =
+  var bindings = initTable[Symbol, Expr]()
+
+  if not self.`case`.state.patternMatch(state, bindings, self.scope):
+    return
+  if not self.`case`.read.patternMatch(read, bindings, self.scope):
+    return
+
+  for name, `type` in self.scope:
+    let value = bindings[name]
+    if not typeContainsValue(types, `type`, value):
+      return
+  return some((
+    self.`case`.write.substituteBindings(bindings),
+    self.`case`.action.substituteBindings(bindings),
+    self.`case`.next.substituteBindings(bindings),
+  ))
+
+proc substituteVar(self: Case, name: Symbol, expr: Expr): Case =
+  var bindings = {name: expr}.toTable()
+  return Case(
+    keyword: self.keyword,
+    state:   self.state.substituteBindings(bindings),
+    read:    self.read.substituteBindings(bindings),
+    write:   self.write.substituteBindings(bindings),
+    action:  self.action.substituteBindings(bindings),
+    next:    self.next.substituteBindings(bindings),
+  )
+
+proc normalize(self: Case): Case =
+  return Case(
+    keyword: self.keyword,
+    state:   self.state.normalize(),
+    read:    self.read.normalize(),
+    write:   self.write.normalize(),
+    action:  self.action.normalize(),
+    next:    self.next.normalize(),
+  )
+
+proc expand(self: ScopedCase, types: Table[Symbol, seq[Expr]],  normalize = false) =
+  for name, `type` in self.scope:
+    if Some(@exprs) ?= types.get(`type`):
+      for expr in exprs:
+        let `case` = self.`case`.substituteVar(name, expr)
+        if normalize:
+          echo `case`.normalize()
+        else:
+          echo `case`
+    else:
+      case `type`.name:
+      of "Integer":
+        panic `type`.loc, &"The type `{`type`}` can't be expanded as it is too big."
+      else:
+        panic `type`.loc, &"Unknown type `{`type`}`."
+
+proc `$`(self: Statement): string =
   case self.kind
   of skCase:
-    var bindings = initTable[Symbol, Expr]()
-
-    if not self.state.patternMatch(state, bindings, some(scope)):
-      return
-    if not self.read.patternMatch(read, bindings, some(scope)):
-      return
-
-    for name, `type` in scope:
-      let value = bindings[name]
-      if not typeContainsValue(program, `type`, value):
-        return
-    return some((
-      self.write.substituteBindings(bindings),
-      self.action.substituteBindings(bindings),
-      self.next.substituteBindings(bindings),
-    ))
+    return &"{self.`case`.keyword} {self.`case`.state} {self.`case`.read} {self.`case`.write} {self.`case`.action} {self.`case`.next}"
   of skVar:
-    if Some(@shadowedVar) ?= scope.getKey(self.name):
-      error self.name.loc, &"`{self.name}` shadows another name in the higher scope."
-      note shadowedVar.loc, "The shadowed name is located here."
-      quit(1)
-    scope[self.name] = self.`type`
-    result = self.body.typeCheckCase(program, state, read, scope)
-    scope.del(self.name)
+    return &"var {self.name} : {self.`type`} {self.body}"
   of skBlock:
+    result = "{\n"
     for statement in self.statements:
-      if Some(@triple) ?= statement.typeCheckCase(program, state, read, scope):
-        return some(triple)
+      result &= &"  {statement}\n"
+    result &= "}"
 
-proc sanityCheck(self: Statement, program: Program, scope: var Table[Symbol, Symbol]) =
+proc compileToCases(self: Statement, types: Table[Symbol, seq[Expr]], scope: var Table[Symbol, Symbol], scopedCases: var seq[ScopedCase]) =
   case self.kind
   of skCase:
     var unusedVars = newSeq[Symbol]()
     for name, `type` in scope:
-      if not (program.types.hasKey(`type`) or `type`.name in ["Integer"]):
+      if not (types.hasKey(`type`) or `type`.name in ["Integer"]):
         panic `type`.loc, &"Unknown type `{`type`}`."
-      if self.state.usesVar(name).orElse(self.read.usesVar(name)).isNone():
+      if self.`case`.state.usesVar(name).orElse(self.`case`.read.usesVar(name)).isNone():
         unusedVars.add(name)
     if unusedVars.len > 0:
-      error self.keyword.loc, "Not all variables in the scope are used in the input of this case."
+      error self.`case`.keyword.loc, "Not all variables in the scope are used in the input of this case."
       for `var` in unusedVars:
         note `var`.loc, &"Unused variable `{`var`}`."
       quit(1)
+    scopedCases.add(ScopedCase(`case`: self.`case`, scope: scope))
   of skVar:
     if Some(@shadowedVar) ?= scope.getKey(self.name):
       error self.name.loc, &"`{self.name}` shadows another name in the higher scope."
       note shadowedVar.loc, "The shadowed name is located here."
       quit(1)
     scope[self.name] = self.`type`
-    self.body.sanityCheck(program, scope)
+    self.body.compileToCases(types, scope, scopedCases)
     scope.del(self.name)
   of skBlock:
     for statement in self.statements:
-      statement.sanityCheck(program, scope)
-
-proc normalize(self: Statement): Statement =
-  case self.kind
-  of skCase:
-    return Statement(
-      kind:    skCase,
-      keyword: self.keyword,
-      state:   self.state.normalize(),
-      read:     self.read.normalize(),
-      write:   self.write.normalize(),
-      action: self.action.normalize(),
-      next:     self.next.normalize(),
-    )
-  of skVar:
-    return Statement(
-      kind: skVar,
-      `type`: self.`type`,
-      body: self.body.normalize(),
-    )
-  of skBlock:
-    return Statement(
-      kind: skBlock,
-      statements: self.statements.map_it(it.normalize())
-    )
-
-proc expand(self: Statement, program: var Program, normalize = false) =
-  case self.kind
-  of skCase:
-    if normalize:
-      echo self.normalize()
-    else:
-      echo self
-  of skVar:
-    if Some(@exprs) ?= program.types.get(self.`type`):
-      for expr in exprs:
-        self.body.substituteVar(self.name, expr).expand(program, normalize)
-    else:
-      case self.`type`.name:
-      of "Integer":
-        panic self.`type`.loc, &"The type `{self.`type`}` can't be expanded as it is too big."
-      else:
-        panic self.`type`.loc, &"Unknown type `{self.`type`}`."
-  of skBlock:
-    for statement in self.statements:
-      statement.expand(program, normalize)
+      statement.compileToCases(types, scope, scopedCases)
 
 proc parseSeq(lexer: var Lexer): seq[Expr] =
   discard lexer.expectSymbol("{")
@@ -211,15 +168,14 @@ proc parseStatement(lexer: var Lexer): Statement =
   let key = lexer.expectSymbol("case", "var", "{")
   case key.name
   of "case":
-    return Statement(
-      kind: skCase,
+    return Statement(kind: skCase, `case`: Case(
       keyword: key,
       state:   parseExpr(lexer),
       read:    parseExpr(lexer),
       write:   parseExpr(lexer),
       action:  parseExpr(lexer),
       next:    parseExpr(lexer),
-    )
+    ))
   of "var":
     var vars = newSeq[Symbol]()
     while Some(@symbol) ?= lexer.peek():
@@ -245,12 +201,12 @@ proc parseStatement(lexer: var Lexer): Statement =
       statements: statements,
     )
 
-proc parseSource(lexer: var Lexer): Program =
+proc parseSource(lexer: var Lexer): (seq[Statement], Table[Symbol, seq[Expr]], seq[Run]) =
   while Some(@key) ?= lexer.peek():
     case key.name
     of "run", "trace":
       let keyword = lexer.expectSymbol("run", "trace")
-      result.runs.add(Run(
+      result[2].add(Run(
         keyword: keyword,
         state: parseExpr(lexer),
         tape: parseSeq(lexer),
@@ -259,14 +215,19 @@ proc parseSource(lexer: var Lexer): Program =
     of "type":
       discard lexer.next
       let name = lexer.expectSymbol()
-      if result.types.hasKey(name):
+      if result[1].hasKey(name):
         panic name.loc, &"Redefinition of type `{name}`."
       let seq = parseSeq(lexer)
-      result.types[name] = seq
+      result[1][name] = seq
     of "case", "var":
-      result.statements.add(parseStatement(lexer))
+      result[0].add(parseStatement(lexer))
     else:
       panic key.loc, &"Unknown keyword `{key}`."
+
+proc compileCasesFromStatements(types: Table[Symbol, seq[Expr]], statements: seq[Statement]): seq[ScopedCase] =
+  for statement in statements:
+    var scope = initTable[Symbol, Symbol]()
+    statement.compileToCases(types, scope, result)
 
 proc expand(self: Run, normalize = false) =
   let keyword = if self.trace: "trace" else: "run"
@@ -279,11 +240,6 @@ proc expand(self: Run, normalize = false) =
   tape &= "}"
   echo &"{keyword} {self.state} {tape}"
 
-proc sanityCheck(self: Program) =
-  for statement in self.statements:
-    var scope = initTable[Symbol, Symbol]()
-    statement.sanityCheck(self, scope)
-
 proc print(self: Machine) =
   for expr in self.tape:
     stdout.write &"{expr} "
@@ -292,19 +248,17 @@ proc print(self: Machine) =
 proc trace(self: Machine) =
   var buffer = &"{self.state}: "
   var head = 0
-  var lastExpr = Expr()
   var underline = ""
   for i, expr in enumerate(self.tape):
     if i == self.head:
-      head = buffer.len
-      underline = '~'.repeat(len($expr)-1)
+      head = buffer.utf8Len
+      underline = '~'.repeat(utf8Len($expr)-1)
     buffer &= &"{expr} "
   echo &"{buffer}\n{' '.repeat(head)}^{underline}"
 
 proc next(self: var Machine, program: var Program) =
-  for statement in program.statements:
-    var scope = initTable[Symbol, Symbol]()
-    if Some((@write, @action, @next)) ?= statement.typeCheckCase(program, self.state, self.tape[self.head], scope):
+  for `case` in program.scopedCases:
+    if Some((@write, @action, @next)) ?= `case`.typeCheckNextCase(program.types, self.state, self.tape[self.head]):
       if write.kind == ekEval:
         if write.lhs.kind == ekInteger:
           if write.rhs.kind == ekInteger:
@@ -370,9 +324,9 @@ commands = @[
       let source = try: readFile(sourcePath)
                    except: panic &"Could not read file `{sourcePath}`."
       var lexer = tokenize(sourcePath, source)
-      var program = parseSource(lexer)
-
-      program.sanityCheck()
+      var (statements, types, runs) = parseSource(lexer)
+      var scopedCases = compileCasesFromStatements(types, statements)
+      var program = Program(scopedCases: scopedCases, types: types, runs: runs)
 
       setControlCHook(nil)
       for run in program.runs:
@@ -418,14 +372,13 @@ commands = @[
       let source = try: readFile(sourcePath.get)
                    except: panic &"Could not read file `{sourcePath.get}`."
       var lexer = tokenize(sourcePath.get, source)
-      var program = parseSource(lexer)
-
-      program.sanityCheck()
+      var (statements, types, runs) = parseSource(lexer)
+      var scopedCases = compileCasesFromStatements(types, statements)
       
-      for statement in program.statements:
-        statement.expand(program, noExpr)
+      for `case` in scopedCases:
+        `case`.expand(types, noExpr)
 
-      for run in program.runs:
+      for run in runs:
         run.expand(noExpr)
   ),
   Command(
