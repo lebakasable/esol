@@ -81,7 +81,7 @@ proc normalize(self: Case): Case =
 # TODO: fix expand
 proc expand(self: ScopedCase, types: Table[Symbol, TypeExpr],  normalize = false) =
   for name, `type` in self.scope:
-    for typeExpr in elements(`type`, types):
+    for typeExpr in `type`.expand(types):
       let `case` = self.`case`.substituteVar(name, typeExpr)
       if normalize:
         echo `case`.normalize()

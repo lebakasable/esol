@@ -6,7 +6,8 @@ import
   std/strformat,
   fusion/matching,
   std/options,
-  std/tables
+  std/tables,
+  std/enumerate
 
 type
   TypeExprKind* = enum
@@ -62,6 +63,7 @@ proc parseTypeExpr*(lexer: var Lexer): TypeExpr =
     of akInteger:
       panic atom.symbol.loc, "Integer is not a type expression."
   if Some(@symbol) ?= lexer.peek():
+    # TODO: operator precedence
     case symbol.name
     of "+":
       discard lexer.next()
@@ -73,19 +75,18 @@ proc parseTypeExpr*(lexer: var Lexer): TypeExpr =
   else:
       return lhs
 
-proc elements*(self: TypeExpr, types: Table[Symbol, TypeExpr]): HashSet[Expr] =
+proc expand*(self: TypeExpr, types: Table[Symbol, TypeExpr]): HashSet[Expr] =
   case self.kind
   of tekNamed:
-    if Some(@typeExpr) ?= types.get(self.name):
-      return elements(typeExpr, types)
-    else:
-      panic self.name.loc, &"Unknown type `{self.name}`."
+    return types[self.name].expand(types)
   of tekAnonymous:
     return self.elements
   of tekInteger:
     panic self.symbol.loc, &"The type `{self.symbol}` can't be expanded as it is too big."
-  of tekUnion, tekDiff:
-    return elements(self.lhs, types) + elements(self.rhs, types)
+  of tekUnion:
+    return self.lhs.expand(types).union(self.rhs.expand(types))
+  of tekDiff:
+    return self.lhs.expand(types).difference(self.rhs.expand(types))
     
 proc contains*(self: TypeExpr, element: Expr, types: Table[Symbol, TypeExpr]): bool =
   case self.kind
@@ -98,4 +99,3 @@ proc contains*(self: TypeExpr, element: Expr, types: Table[Symbol, TypeExpr]): b
   of tekInteger: return element.kind == ekAtom and element.atom.kind == akInteger
   of tekUnion: return self.lhs.contains(element, types) or self.rhs.contains(element, types)
   of tekDiff: return self.lhs.contains(element, types) and not self.rhs.contains(element, types)
-
