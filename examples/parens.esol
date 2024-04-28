@@ -1,35 +1,40 @@
-type Paren { '(' ')' }
-type Bit { 0 1 }
+type Open  { '(' '[' '{' }
+type Close { ')' ']' '}' }
+type Paren Open + Close
 
-trace Entry { & '(' '(' ')' ')' & 0 }
+//trace Entry { % '[' '(' ')' ']' '{' '}' & . }
+trace Entry { % ']' & . }
 
-case Entry & & -> Pick
+case Entry % % -> Pick
 
-var p : Paren
-case Pick p & -> (Pick p)
 case Pick & & -> Verify
 
-case Verify 0 0 -> Balanced
-case Verify 1 1 -> Unbalanced
+var p : Open case Verify p p . (Unbalanced Overflow)
+case Verify . . . Balanced
 
-var p a : Paren
-case (Pick p) a a -> (Pick p)
+var p   : Paren case Pick     p % -> (Pick p)
+var p q : Paren case (Pick p) q q -> (Pick p)
+var p   : Paren case (Pick p) & & -> (Update p)
 
-case (Pick '(') & & -> Inc
-case (Pick ')') & & -> Dec
+var p q : Open case (Update p) q q -> (Update p)
+var p   : Open case (Update p) . p <- Entry
 
-case Inc 0 1 <- (Reset Bits)
-case Inc 1 1 -> Inc
+var p : Close
+var q : Open
+case (Update p) q q -> (Update p)
 
-var a : Bit
-case (Reset Bits) a a <- (Reset Bits)
-case (Reset Bits) & & <- (Reset Parens)
+var p : Close
+case (Update p) . . <- (Pop p)
 
-var p : Paren
-case (Reset Parens) p p <- (Reset Parens)
-case (Reset Parens) & & -> Pick
+var p : Close
+case (Pop p) & & . (Unbalanced Underflow)
 
-case Dec  1 1 -> Dec
-case Dec  0 0 <- Dec1
-case Dec1 1 0 <- (Reset Bits)
-case Dec1 & & <- Unbalanced
+case (Pop ')') '(' . <- Entry
+case (Pop ']') '[' . <- Entry
+case (Pop '}') '{' . <- Entry
+
+var p : Close
+var q : Open
+case (Pop p) q q . (Unbalanced Mismatch q p)
+
+var _ : Paren + { & } case Entry _ _ <- Entry
