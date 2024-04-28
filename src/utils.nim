@@ -70,3 +70,6 @@ proc utf8Len*(s: string): int =
   for rune in s.toRunes:
     if rune.size > 2: result += 2
     else: result += 1
+
+proc unreachable*() =
+  assert false, "unreachable"

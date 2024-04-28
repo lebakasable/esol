@@ -164,7 +164,7 @@ proc compileToCases(self: Statement, types: Table[Symbol, TypeExpr], scope: var 
       statement.compileToCases(types, scope, scopedCases)
 
 proc parseStatement(lexer: var Lexer): Statement =
-  let key = lexer.expectSymbol("case", "var", "{")
+  let key = lexer.expect("case", "var", "{")
   case key.name
   of "case":
     return Statement(kind: skCase, `case`: Case(
@@ -179,8 +179,8 @@ proc parseStatement(lexer: var Lexer): Statement =
     var vars = newSeq[Symbol]()
     while Some(@symbol) ?= lexer.peek():
       if symbol.name == ":": break
-      vars.add(lexer.expectSymbol())
-    discard lexer.expectSymbol(":")
+      vars.add(lexer.expect())
+    discard lexer.expect(":")
     let `type` = parseTypeExpr(lexer)
     result = parseStatement(lexer)
     for i in countdown(vars.len - 1, 0):
@@ -194,7 +194,7 @@ proc parseStatement(lexer: var Lexer): Statement =
     while Some(@symbol) ?= lexer.peek():
       if symbol.name == "}": break
       statements.add(parseStatement(lexer))
-    discard lexer.expectSymbol("}")
+    discard lexer.expect("}")
     return Statement(
       kind: skBlock,
       statements: statements,
@@ -204,14 +204,14 @@ proc parseSource(lexer: var Lexer): (seq[Statement], Table[Symbol, TypeExpr], se
   while Some(@key) ?= lexer.peek():
     case key.name
     of "run", "trace":
-      let keyword = lexer.expectSymbol("run", "trace")
+      let keyword = lexer.expect("run", "trace")
       let state = parseExpr(lexer)
-      discard lexer.expectSymbol("{")
+      discard lexer.expect("{")
       var tape = newSeq[Expr]()
       while Some(@symbol) ?= lexer.peek():
         if symbol.name == "}": break
         tape.add(parseExpr(lexer))
-      discard lexer.expectSymbol("}")
+      discard lexer.expect("}")
       result[2].add(Run(
         keyword: keyword,
         state: state,
@@ -220,7 +220,7 @@ proc parseSource(lexer: var Lexer): (seq[Statement], Table[Symbol, TypeExpr], se
       ))
     of "type":
       discard lexer.next
-      let name = lexer.expectSymbol()
+      let name = lexer.expect()
       if result[1].hasKey(name):
         panic name.loc, &"Redefinition of type `{name}`."
       result[1][name] = parseTypeExpr(lexer)
@@ -267,11 +267,7 @@ proc next(self: var Machine, program: var Program) =
       if write.kind == ekEval:
         if write.lhs.kind == ekAtom and write.lhs.atom.kind == akInteger:
           if write.rhs.kind == ekAtom and write.rhs.atom.kind == akInteger:
-            self.tape[self.head] = Expr(kind: ekAtom, atom: Atom(
-              kind: akInteger,
-              symbol: write.openBracket,
-              value: write.lhs.atom.value + write.rhs.atom.value,
-            ))
+            self.tape[self.head] = write.eval() 
           else:
             panic write.rhs.loc, "Right hand side value must be an integer."
         else:

@@ -35,6 +35,7 @@ type
     of ekEval:
       openBracket*: Symbol
       lhs*: Expr
+      op*: Expr
       rhs*: Expr
   TypeExprKind* = enum
     tekNamed
@@ -75,28 +76,29 @@ proc toExpr*(symbol: Symbol, integer: int): Expr =
   return Expr(kind: ekAtom, atom: Atom(kind: akInteger, symbol: symbol, value: integer))
 
 proc parseExpr*(lexer: var Lexer): Expr =
-  let symbol = lexer.expectSymbol()
+  let symbol = lexer.expect()
   case symbol.name
   of "(":
     var items = newSeq[Expr]()
     while Some(@nextSymbol) ?= lexer.peek():
       if nextSymbol.name == ")": break
       items.add(parseExpr(lexer))
-    discard lexer.expectSymbol(")")
+    discard lexer.expect(")")
     return Expr(
       kind: ekTuple,
       openParen: symbol,
       items: items,
     )
   of "[":
-    let lhs = lexer.expectSymbol().toExpr()
-    discard lexer.expectSymbol("+")
-    let rhs = lexer.expectSymbol().toExpr()
-    discard lexer.expectSymbol("]")
+    let lhs = lexer.expect().toExpr()
+    let op = lexer.expect().toExpr()
+    let rhs = lexer.expect().toExpr()
+    discard lexer.expect("]")
     return Expr(
       kind: ekEval,
       openBracket: symbol,
       lhs: lhs,
+      op: op,
       rhs: rhs,
     )
   else: 
@@ -120,7 +122,7 @@ proc `$`*(self: Expr): string =
         buffer &= &" {item}"
     return buffer & ")"
   of ekEval:
-    return &"[{self.lhs} + {self.rhs}]"
+    return &"[{self.lhs} {self.op} {self.rhs}]"
 
 proc `==`*(self, other: Expr): bool =
   case (self.kind, other.kind)
@@ -156,6 +158,7 @@ proc substituteBindings*(self: Expr, bindings: Table[Symbol, Expr]): Expr =
       kind: ekEval,
       openBracket: self.openBracket,
       lhs: self.lhs.substituteBindings(bindings),
+      op: self.op.substituteBindings(bindings),
       rhs: self.rhs.substituteBindings(bindings),
     )
 
@@ -239,7 +242,7 @@ proc `$`*(self: TypeExpr): string =
   of tekDiff: return &"{self.lhs} - {self.rhs}"
 
 proc parseTypeExpr*(lexer: var Lexer): TypeExpr =
-  let symbol = lexer.expectSymbol()
+  let symbol = lexer.expect()
   var lhs: TypeExpr
   case symbol.name
   of "{":
@@ -247,7 +250,7 @@ proc parseTypeExpr*(lexer: var Lexer): TypeExpr =
     while Some(@symbol) ?= lexer.peek():
       if symbol.name == "}": break
       elements.add(parseExpr(lexer))
-    discard lexer.expectSymbol("}")
+    discard lexer.expect("}")
     lhs = TypeExpr(kind: tekAnonymous, elements: elements.toHashSet())
   else:
     let atom = fromSymbol(symbol)
@@ -271,3 +274,21 @@ proc parseTypeExpr*(lexer: var Lexer): TypeExpr =
     else: return lhs
   else:
       return lhs
+
+proc eval*(self: Expr): Expr =
+  let op = self.op.atom.symbol
+  case op.name
+  of "+":
+    return Expr(kind: ekAtom, atom: Atom(
+      kind: akInteger,
+      symbol: self.openBracket,
+      value: self.lhs.atom.value + self.rhs.atom.value,
+    ))
+  of "%":
+    return Expr(kind: ekAtom, atom: Atom(
+      kind: akInteger,
+      symbol: self.openBracket,
+      value: self.lhs.atom.value %% self.rhs.atom.value,
+    ))
+  else:
+    panic op.loc, &"Unknown operation `{op}`."

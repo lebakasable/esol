@@ -65,14 +65,14 @@ proc peek*(self: Lexer): Option[Symbol] =
   if self.symbols.len > 0:
     return some(self.symbols[0])
 
-proc expectSymbol*(self: var Lexer, expectedNames: varargs[string]): Symbol =
+proc expect*(self: var Lexer, expectedNames: varargs[string]): Symbol =
   if expectedNames.len == 0:
     if Some(@symbol) ?= self.next:
       return symbol
     else:
       panic self.loc, "Expected symbol but reached the end of the input."
   else:
-    let symbol = self.expectSymbol()
+    let symbol = self.expect()
     for name in expectedNames:
       if symbol.name == name:
         return symbol
