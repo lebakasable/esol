@@ -59,11 +59,37 @@ proc asVar*(self: Atom, scope: Table[Symbol, TypeExpr]): Option[TypeExpr] =
   if self.kind == akSymbol:
     return scope.get(self.symbol)
 
-proc fromSymbol*(symbol: Symbol): Atom =
+proc expectSymbol*(self: Atom): Symbol =
+  case self.kind
+  of akSymbol: return self.symbol
+  of akInteger: panic self.symbol.loc, "Expected symbol but got integer `{self.value}`."
+
+proc expectInteger*(self: Atom): int =
+  case self.kind
+  of akInteger: return self.value
+  of akSymbol: panic self.symbol.loc, "Expected integer but got symbol `{self.symbol}`."
+
+proc expectAtom*(self: Expr): Atom =
+  case self.kind
+  of ekAtom: return self.atom
+  of ekTuple: panic self.openParen.loc, "Expected atom but got tuple `{self}`."
+  of ekEval: panic self.openBracket.loc, "Expected atom but got eval expression `{self}`."
+
+proc expectBool*(self: Symbol): bool =
+  case self.name
+  of "true": return true
+  of "false": return false
+  else:
+    panic self.loc, "Expected boolean but got symbol `{self.name}`."
+
+proc atomFromSymbol*(symbol: Symbol): Atom =
   try:
     return Atom(kind: akInteger, symbol: symbol, value: symbol.name.parseInt)
   except:
     return Atom(kind: akSymbol, symbol: symbol)
+
+proc exprFromSymbol*(symbol: Symbol): Expr =
+  return Expr(kind: ekAtom, atom: atomFromSymbol(symbol))
 
 proc asSymbol*(self: Expr): Option[Symbol] =
   if self.kind == ekAtom:
@@ -90,9 +116,9 @@ proc parseExpr*(lexer: var Lexer): Expr =
       items: items,
     )
   of "[":
-    let lhs = lexer.expect().toExpr()
-    let op = lexer.expect().toExpr()
-    let rhs = lexer.expect().toExpr()
+    let lhs = lexer.parseExpr()
+    let op = lexer.parseExpr()
+    let rhs = lexer.parseExpr()
     discard lexer.expect("]")
     return Expr(
       kind: ekEval,
@@ -253,7 +279,7 @@ proc parseTypeExpr*(lexer: var Lexer): TypeExpr =
     discard lexer.expect("}")
     lhs = TypeExpr(kind: tekAnonymous, elements: elements.toHashSet())
   else:
-    let atom = fromSymbol(symbol)
+    let atom = atomFromSymbol(symbol)
     case atom.kind
     of akSymbol:
       case atom.symbol.name
@@ -276,19 +302,51 @@ proc parseTypeExpr*(lexer: var Lexer): TypeExpr =
       return lhs
 
 proc eval*(self: Expr): Expr =
-  let op = self.op.atom.symbol
-  case op.name
-  of "+":
-    return Expr(kind: ekAtom, atom: Atom(
-      kind: akInteger,
-      symbol: self.openBracket,
-      value: self.lhs.atom.value + self.rhs.atom.value,
-    ))
-  of "%":
-    return Expr(kind: ekAtom, atom: Atom(
-      kind: akInteger,
-      symbol: self.openBracket,
-      value: self.lhs.atom.value %% self.rhs.atom.value,
-    ))
-  else:
-    panic op.loc, &"Unknown operation `{op}`."
+  case self.kind
+  of ekAtom: return self
+  of ekTuple:
+    result = self
+    result.items = result.items.mapIt(it.eval())
+  of ekEval:
+    let op = self.op.eval.expectAtom.expectSymbol
+    let lhs = self.lhs.eval.expectAtom
+    case lhs.kind
+    of akInteger:
+      let lhs = lhs.expectInteger
+      let rhs = self.rhs.eval.expectAtom.expectInteger
+      case op.name
+      of "+":
+        return Expr(kind: ekAtom, atom: Atom(
+          kind: akInteger,
+          symbol: self.openBracket,
+          value: lhs + rhs,
+        ))
+      of "%":
+        return Expr(kind: ekAtom, atom: Atom(
+          kind: akInteger,
+          symbol: self.openBracket,
+          value: lhs %% rhs,
+        ))
+      of "<":
+        return Expr(kind: ekAtom, atom: Atom(kind: akSymbol, symbol: Symbol(
+          name: if lhs < rhs: "true" else: "false",
+          loc: self.openBracket.loc
+        )))
+      of "==":
+        return Expr(kind: ekAtom, atom: Atom(kind: akSymbol, symbol: Symbol(
+          name: if lhs == rhs: "true" else: "false",
+          loc: self.openBracket.loc
+        )))
+      else:
+        panic op.loc, &"Unknown operation `{op}`."
+    of akSymbol:
+      let lhs = lhs.symbol.expectBool
+      let rhs = self.rhs.eval.expectAtom.expectSymbol.expectBool
+      case op.name
+      of "||":
+        return Expr(kind: ekAtom, atom: Atom(kind: akSymbol, symbol: Symbol(
+          name: if lhs or rhs: "true" else: "false",
+          loc: self.openBracket.loc
+        )))
+      else:
+        panic op.loc, &"Unknown operation `{op}`."

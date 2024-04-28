@@ -264,16 +264,7 @@ proc trace(self: Machine) =
 proc next(self: var Machine, program: var Program) =
   for `case` in program.scopedCases:
     if Some((@write, @action, @next)) ?= `case`.typeCheckNextCase(program.types, self.state, self.tape[self.head]):
-      if write.kind == ekEval:
-        if write.lhs.kind == ekAtom and write.lhs.atom.kind == akInteger:
-          if write.rhs.kind == ekAtom and write.rhs.atom.kind == akInteger:
-            self.tape[self.head] = write.eval() 
-          else:
-            panic write.rhs.loc, "Right hand side value must be an integer."
-        else:
-          panic write.lhs.loc, "Left hand side value must be an integer."
-      else:
-        self.tape[self.head] = write
+      self.tape[self.head] = eval(write)
       if Some(@action) ?= action.asSymbol():
         case action.name:
           of "<-":
@@ -290,7 +281,7 @@ proc next(self: var Machine, program: var Program) =
             panic action.loc, "Action can only be `->`, `<-`, `.` or `!`."
       else:
         panic action.loc, "Action must be a symbol."
-      self.state = next
+      self.state = next.eval()
       self.halt = false
       break
   
