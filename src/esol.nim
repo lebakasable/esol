@@ -137,7 +137,7 @@ proc intersects(self, other: ScopedCase, types: Table[Symbol, HashSet[Expr]]): b
   self.`case`.state.intersects(other.`case`.state, self.scope, other.scope, types) and
   self.`case`.read.intersects(other.`case`.read, self.scope, other.scope, types)
 
-proc checkUnreachableCases(scopedCases: seq[ScopeCase], types: Table[Symbol, HashSet[Expr]]) =
+proc checkUnreachableCases(scopedCases: seq[ScopedCase], types: Table[Symbol, HashSet[Expr]]) =
   for i in 0..<scopedCases.len:
     for j in i+1..<scopedCases.len:
       let (a, b) = (scopedCases[i], scopedCases[j])
