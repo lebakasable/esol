@@ -385,7 +385,7 @@ commands = @[
       var scopedCases = compileCasesFromStatements(types, statements)
       var program = Program(scopedCases: scopedCases, types: types, runs: runs)
 
-      checkUnreachableCases(scopedCases, types)
+      #checkUnreachableCases(scopedCases, types)
       
       setControlCHook(nil)
       for run in program.runs:
@@ -434,7 +434,7 @@ commands = @[
       var (statements, types, runs) = parseSource(lexer)
       var scopedCases = compileCasesFromStatements(types, statements)
 
-      checkUnreachableCases(scopedCases, types)
+      #checkUnreachableCases(scopedCases, types)
 
       for `case` in scopedCases:
         `case`.expand(types, noExpr)
