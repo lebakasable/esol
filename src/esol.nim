@@ -103,6 +103,7 @@ proc normalize(self: Case): Case =
     next:    self.next.normalize(),
   )
 
+# TODO: fix expand
 proc expand(self: ScopedCase, types: Table[Symbol, TypeExpr],  normalize = false) =
   for name, `type` in self.scope:
     for typeExpr in elements(`type`, types):
