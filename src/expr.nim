@@ -69,12 +69,6 @@ proc expectInteger*(self: Atom): int =
   of akInteger: return self.value
   of akSymbol: panic self.symbol.loc, &"Expected integer but got symbol `{self.symbol}`."
 
-proc expectAtom*(self: Expr): Atom =
-  case self.kind
-  of ekAtom: return self.atom
-  of ekTuple: panic self.openParen.loc, &"Expected atom but got tuple `{self}`."
-  of ekEval: panic self.openBracket.loc, &"Expected atom but got eval expression `{self}`."
-
 proc expectBool*(self: Symbol): bool =
   case self.name
   of "true": return true
@@ -164,6 +158,12 @@ proc `==`*(self, other: Expr): bool =
   else: return false
 
 proc hash*(self: Expr): Hash = hash($self)
+
+proc expectAtom*(self: Expr): Atom =
+  case self.kind
+  of ekAtom: return self.atom
+  of ekTuple: panic self.openParen.loc, &"Expected atom but got tuple `{self}`."
+  of ekEval: panic self.openBracket.loc, &"Expected atom but got eval expression `{self}`."
  
 proc substituteBindings*(self: Expr, bindings: Table[Symbol, Expr]): Expr =
   case self.kind
