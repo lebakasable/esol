@@ -6,8 +6,7 @@ import
   std/strformat,
   fusion/matching,
   std/options,
-  std/tables,
-  std/enumerate
+  std/tables
 
 type
   TypeExprKind* = enum
@@ -52,7 +51,7 @@ proc parseTypeExpr*(lexer: var Lexer): TypeExpr =
     discard lexer.expect("}")
     lhs = TypeExpr(kind: tekAnonymous, elements: elements.toHashSet())
   else:
-    let atom = atomFromSymbol(symbol)
+    let atom = symbol.toAtom()
     case atom.kind
     of akSymbol:
       case atom.symbol.name

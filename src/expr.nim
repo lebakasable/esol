@@ -15,11 +15,12 @@ type
     akSymbol
     akInteger
   Atom* = object
-    symbol*: Symbol
     case kind*: AtomKind
-    of akSymbol: discard
+    of akSymbol:
+      symbol*: Symbol
     of akInteger:
       value*: int
+      loc*: Location
   ExprKind* = enum
     ekAtom
     ekTuple
@@ -29,13 +30,13 @@ type
     of ekAtom:
       atom*: Atom
     of ekTuple:
-      openParen*: Symbol
       items*: seq[Expr]
+      tupleLoc*: Location
     of ekEval:
-      openBracket*: Symbol
       lhs*: Expr
       op*: Expr
       rhs*: Expr
+      evalLoc*: Location
  
 proc `$`*(self: Expr): string =
   case self.kind:
@@ -72,8 +73,8 @@ proc hash*(self: Expr): Hash = hash($self)
 proc toExpr*(symbol: Symbol): Expr =
   return Expr(kind: ekAtom, atom: Atom(kind: akSymbol, symbol: symbol))
 
-proc toExpr*(symbol: Symbol, integer: int): Expr =
-  return Expr(kind: ekAtom, atom: Atom(kind: akInteger, symbol: symbol, value: integer))
+proc toExpr*(integer: int, loc: Location): Expr =
+  return Expr(kind: ekAtom, atom: Atom(kind: akInteger, value: integer, loc: loc))
 
 proc parseExpr*(lexer: var Lexer): Expr =
   let symbol = lexer.expect()
@@ -86,8 +87,8 @@ proc parseExpr*(lexer: var Lexer): Expr =
     discard lexer.expect(")")
     return Expr(
       kind: ekTuple,
-      openParen: symbol,
       items: items,
+      tupleLoc: symbol.loc,
     )
   of "[":
     let lhs = lexer.parseExpr()
@@ -96,20 +97,20 @@ proc parseExpr*(lexer: var Lexer): Expr =
     discard lexer.expect("]")
     return Expr(
       kind: ekEval,
-      openBracket: symbol,
       lhs: lhs,
       op: op,
       rhs: rhs,
+      evalLoc: symbol.loc,
     )
   else: 
     try:
-      return toExpr(symbol, symbol.name.parseInt())
+      return toExpr(symbol.name.parseInt(), symbol.loc)
     except:
       return toExpr(symbol)
 
-proc atomFromSymbol*(symbol: Symbol): Atom =
+proc toAtom*(symbol: Symbol): Atom =
   try:
-    return Atom(kind: akInteger, symbol: symbol, value: symbol.name.parseInt)
+    return Atom(kind: akInteger, value: symbol.name.parseInt, loc: symbol.loc)
   except:
     return Atom(kind: akSymbol, symbol: symbol)
 
@@ -118,8 +119,8 @@ import ./typeexpr
 proc expectAtom*(self: Expr): Atom =
   case self.kind
   of ekAtom: return self.atom
-  of ekTuple: panic self.openParen.loc, &"Expected atom but got tuple `{self}`."
-  of ekEval: panic self.openBracket.loc, &"Expected atom but got eval expression `{self}`."
+  of ekTuple: panic self.tupleLoc, &"Expected atom but got tuple `{self}`."
+  of ekEval: panic self.evalLoc, &"Expected atom but got eval expression `{self}`."
 
 proc expectSymbol*(self: Atom): Symbol =
   case self.kind
@@ -143,7 +144,7 @@ proc asVar*(self: Atom, scope: Table[Symbol, TypeExpr]): Option[TypeExpr] =
     return scope.get(self.symbol)
 
 proc exprFromSymbol*(symbol: Symbol): Expr =
-  return Expr(kind: ekAtom, atom: atomFromSymbol(symbol))
+  return Expr(kind: ekAtom, atom: symbol.toAtom())
 
 proc asSymbol*(self: Expr): Option[Symbol] =
   if self.kind == ekAtom:
@@ -162,21 +163,21 @@ proc substituteBindings*(self: Expr, bindings: Table[Symbol, Expr]): Expr =
       return self
   of ekTuple:
     let items = self.items.mapIt(it.substituteBindings(bindings))
-    return Expr(kind: ekTuple, openParen: self.openParen, items: items)
+    return Expr(kind: ekTuple, items: items, tupleLoc: self.tupleLoc)
   of ekEval:
     return Expr(
       kind: ekEval,
-      openBracket: self.openBracket,
       lhs: self.lhs.substituteBindings(bindings),
       op: self.op.substituteBindings(bindings),
       rhs: self.rhs.substituteBindings(bindings),
+      evalLoc: self.evalLoc,
     )
 
 proc loc*(self: Expr): Location =
   case self.kind
   of ekAtom: return self.atom.symbol.loc
-  of ekTuple: return self.openParen.loc
-  of ekEval: return self.openBracket.loc
+  of ekTuple: return self.tupleLoc
+  of ekEval: return self.evalLoc
 
 proc patternMatch*(self: Expr, value: Expr, bindings: var Table[Symbol, Expr], scope: Table[Symbol, TypeExpr]): bool =
   case self.kind
@@ -234,7 +235,7 @@ proc normalize*(self: Expr): Expr =
     buffer &= "_"
     return Expr(kind: ekAtom, atom: Atom(
       kind: akSymbol,
-      symbol: Symbol(name: buffer, loc: self.openParen.loc),
+      symbol: Symbol(name: buffer, loc: self.tupleLoc),
     ))
   of ekEval:
     panic "Normalizing `eval` expressions has not been implemented yet."
@@ -256,24 +257,24 @@ proc eval*(self: Expr): Expr =
       of "+":
         return Expr(kind: ekAtom, atom: Atom(
           kind: akInteger,
-          symbol: self.openBracket,
           value: lhs + rhs,
+          loc: self.loc,
         ))
       of "%":
         return Expr(kind: ekAtom, atom: Atom(
           kind: akInteger,
-          symbol: self.openBracket,
           value: lhs %% rhs,
+          loc: self.loc,
         ))
       of "<":
         return Expr(kind: ekAtom, atom: Atom(kind: akSymbol, symbol: Symbol(
           name: if lhs < rhs: "true" else: "false",
-          loc: self.openBracket.loc
+          loc: self.loc
         )))
       of "==":
         return Expr(kind: ekAtom, atom: Atom(kind: akSymbol, symbol: Symbol(
           name: if lhs == rhs: "true" else: "false",
-          loc: self.openBracket.loc
+          loc: self.loc
         )))
       else:
         panic op.loc, &"Unknown operation `{op}`."
@@ -284,7 +285,7 @@ proc eval*(self: Expr): Expr =
       of "||":
         return Expr(kind: ekAtom, atom: Atom(kind: akSymbol, symbol: Symbol(
           name: if lhs or rhs: "true" else: "false",
-          loc: self.openBracket.loc
+          loc: self.loc
         )))
       else:
         panic op.loc, &"Unknown operation `{op}`."
