@@ -20,7 +20,7 @@ type
       symbol*: Symbol
     of akInteger:
       value*: int
-      loc*: Location
+      loc*: Loc
   ExprKind* = enum
     ekAtom
     ekTuple
@@ -31,12 +31,12 @@ type
       atom*: Atom
     of ekTuple:
       items*: seq[Expr]
-      tupleLoc*: Location
+      tupleLoc*: Loc
     of ekEval:
       lhs*: Expr
       op*: Expr
       rhs*: Expr
-      evalLoc*: Location
+      evalLoc*: Loc
  
 proc `$`*(self: Expr): string =
   case self.kind:
@@ -73,7 +73,7 @@ proc hash*(self: Expr): Hash = hash($self)
 proc toExpr*(symbol: Symbol): Expr =
   return Expr(kind: ekAtom, atom: Atom(kind: akSymbol, symbol: symbol))
 
-proc toExpr*(integer: int, loc: Location): Expr =
+proc toExpr*(integer: int, loc: Loc): Expr =
   return Expr(kind: ekAtom, atom: Atom(kind: akInteger, value: integer, loc: loc))
 
 proc parseExpr*(lexer: var Lexer): Expr =
@@ -173,7 +173,7 @@ proc substituteBindings*(self: Expr, bindings: Table[Symbol, Expr]): Expr =
       evalLoc: self.evalLoc,
     )
 
-proc loc*(self: Expr): Location =
+proc loc*(self: Expr): Loc =
   case self.kind
   of ekAtom: return self.atom.symbol.loc
   of ekTuple: return self.tupleLoc

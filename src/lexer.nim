@@ -12,24 +12,24 @@ const SPECIAL = (['(', '{', '[',      '.'],
                  [')', '}', ']', ':', '.'])
   
 type
-  Location* = object
+  Loc* = object
     filePath*: string
     row*: int
     col*: int
   Symbol* = object
     name*: string
-    loc*: Location
+    loc*: Loc
   Lexer* = object
     symbols*: seq[Symbol]
-    loc*: Location
+    loc*: Loc
 
-proc `$`*(self: Location): string = &"{self.filePath}:{self.row}:{self.col}"
+proc `$`*(self: Loc): string = &"{self.filePath}:{self.row}:{self.col}"
 proc `$`*(self: Symbol): string = self.name
 proc `==`*(self, other: Symbol): bool = self.name == other.name
 proc hash*(self: Symbol): Hash = self.name.hash()
 
 proc tokenize*(filePath: string, source: string): Lexer =
-  var loc = Location(filePath: filePath, row: 1, col: 1)
+  var loc = Loc(filePath: filePath, row: 1, col: 1)
   var lastWordLen = 0
 
   let lines = source.splitLines()
@@ -54,7 +54,7 @@ proc tokenize*(filePath: string, source: string): Lexer =
           var toAdd = newSeq[Symbol]()
           var lastLoc = loc
           while word.len > 1 and word[word.len-1] in SPECIAL[1]:
-            toAdd.add(Symbol(name: $word[word.len-1], loc: Location(filePath: filePath, row: loc.row, col: lastLoc.col+word.len-1)))
+            toAdd.add(Symbol(name: $word[word.len-1], loc: Loc(filePath: filePath, row: loc.row, col: lastLoc.col+word.len-1)))
             word = $word[0..word.len-2]
             loc.col += 1
 
