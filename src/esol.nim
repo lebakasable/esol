@@ -138,7 +138,7 @@ proc compileToCases(self: Statement, types: Table[Symbol, TypeExpr], scope: var 
     for statement in self.statements:
       statement.compileToCases(types, scope, scopedCases)
 
-proc parseStatement(lexer: var Lexer): Statement =
+proc parseStatement(lexer: var Lexer, types: Table[Symbol, TypeExpr]): Statement =
   let key = lexer.expect("case", "var", "{")
   case key.name
   of "case":
@@ -156,8 +156,8 @@ proc parseStatement(lexer: var Lexer): Statement =
       if symbol.name == ":": break
       vars.add(lexer.expect())
     discard lexer.expect(":")
-    let `type` = parseTypeExpr(lexer)
-    result = parseStatement(lexer)
+    let `type` = parseTypeExpr(lexer, types)
+    result = parseStatement(lexer, types)
     for i in countdown(vars.len - 1, 0):
       result = Statement(
         kind: skVar,
@@ -168,7 +168,7 @@ proc parseStatement(lexer: var Lexer): Statement =
     var statements = newSeq[Statement]()
     while Some(@symbol) ?= lexer.peek():
       if symbol.name == "}": break
-      statements.add(parseStatement(lexer))
+      statements.add(parseStatement(lexer, types))
     discard lexer.expect("}")
     return Statement(
       kind: skBlock,
@@ -198,9 +198,9 @@ proc parseSource(lexer: var Lexer): (seq[Statement], Table[Symbol, TypeExpr], se
       let name = lexer.expect()
       if result[1].hasKey(name):
         panic name.loc, &"Redefinition of type `{name}`."
-      result[1][name] = parseTypeExpr(lexer)
+      result[1][name] = parseTypeExpr(lexer, result[1])
     of "case", "var":
-      result[0].add(parseStatement(lexer))
+      result[0].add(parseStatement(lexer, result[1]))
     else:
       panic key.loc, &"Unknown keyword `{key}`."
 

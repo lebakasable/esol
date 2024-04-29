@@ -2,7 +2,9 @@ import
   std/options,
   fusion/matching,
   std/tables,
-  std/unicode
+  std/unicode,
+  std/sets,
+  std/sequtils
 
 template info*(message: string) =
   stderr.writeLine("INFO: ", message)
@@ -57,6 +59,11 @@ proc shift*(s: var string): Option[char] =
 proc get*[A, B](t: Table[A, B], key: A): Option[B] =
   if t.contains(key):
     return some(t[key])
+
+proc get*[A](t: seq[A], item: A): Option[A] =
+  let found = t.filterIt(it == item)
+  if found.len > 0:
+    return some(found[0])
 
 proc getKey*[A, B](t: Table[A, B], key: A): Option[A] =
   for keyInTable in t.keys:

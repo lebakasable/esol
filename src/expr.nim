@@ -75,6 +75,12 @@ proc `==`*(self, other: Expr): bool =
 
 proc hash*(self: Expr): Hash = hash($self)
 
+proc loc*(self: Expr): Loc =
+  case self.kind
+  of ekAtom: return self.atom.symbol.loc
+  of ekTuple: return self.tupleLoc
+  of ekEval: return self.evalLoc
+
 proc toExpr*(symbol: Symbol): Expr =
   return Expr(kind: ekAtom, atom: Atom(kind: akSymbol, symbol: symbol))
 
@@ -119,8 +125,6 @@ proc toAtom*(symbol: Symbol): Atom =
   except:
     return Atom(kind: akSymbol, symbol: symbol)
 
-import ./typeexpr
-
 proc expectAtom*(self: Expr): Atom =
   case self.kind
   of ekAtom: return self.atom
@@ -143,6 +147,56 @@ proc expectBool*(self: Symbol): bool =
   of "false": return false
   else:
     panic self.loc, &"Expected boolean but got symbol `{self.name}`."
+
+template intOp(op: untyped): Expr =
+  Expr(kind: ekAtom, atom: Atom(
+    kind: akInteger,
+    value: `op`(lhs, rhs),
+    loc: self.loc,
+  ))
+  
+template boolOp(op: untyped): Expr =
+  Expr(kind: ekAtom, atom: Atom(kind: akSymbol, symbol: Symbol(
+    name: if `op`(lhs, rhs): "true" else: "false",
+    loc: self.loc
+  )))
+
+proc eval*(self: Expr): Expr =
+  case self.kind
+  of ekAtom: return self
+  of ekTuple:
+    result = self
+    result.items = result.items.mapIt(it.eval())
+  of ekEval:
+    let op = self.op.eval.expectAtom.expectSymbol
+    let lhs = self.lhs.eval.expectAtom
+    case lhs.kind
+    of akInteger:
+      let lhs = lhs.expectInteger
+      let rhs = self.rhs.eval.expectAtom.expectInteger
+      case op.name
+      of "+": return intOp(`+`)
+      of "-": return intOp(`-`)
+      of "*": return intOp(`*`)
+      of "%": return intOp(`%%`)
+      of "<": return boolOp(`<`)
+      of "<=": return boolOp(`<=`)
+      of ">": return boolOp(`>`)
+      of ">=": return boolOp(`>=`)
+      of "==": return boolOp(`==`)
+      of "!=": return boolOp(`!=`)
+      else:
+        panic op.loc, &"Unknown integer operation `{op}`."
+    of akSymbol:
+      let lhs = lhs.symbol.expectBool
+      let rhs = self.rhs.eval.expectAtom.expectSymbol.expectBool
+      case op.name
+      of "||": return boolOp(`or`)
+      of "&&": return boolOp(`and`)
+      else:
+        panic op.loc, &"Unknown boolean operation `{op}`."
+
+import ./typeexpr
 
 proc asVar*(self: Atom, scope: Table[Symbol, TypeExpr]): Option[TypeExpr] =
   if self.kind == akSymbol:
@@ -177,12 +231,6 @@ proc substituteBindings*(self: Expr, bindings: Table[Symbol, Expr]): Expr =
       rhs: self.rhs.substituteBindings(bindings),
       evalLoc: self.evalLoc,
     )
-
-proc loc*(self: Expr): Loc =
-  case self.kind
-  of ekAtom: return self.atom.symbol.loc
-  of ekTuple: return self.tupleLoc
-  of ekEval: return self.evalLoc
 
 proc patternMatch*(self: Expr, value: Expr, bindings: var Table[Symbol, Expr], scope: Table[Symbol, TypeExpr]): bool =
   case self.kind
@@ -245,50 +293,3 @@ proc normalize*(self: Expr): Expr =
   of ekEval:
     panic "Normalizing `eval` expressions has not been implemented yet."
 
-template intOp(op: untyped): Expr =
-  Expr(kind: ekAtom, atom: Atom(
-    kind: akInteger,
-    value: `op`(lhs, rhs),
-    loc: self.loc,
-  ))
-  
-template boolOp(op: untyped): Expr =
-  Expr(kind: ekAtom, atom: Atom(kind: akSymbol, symbol: Symbol(
-    name: if `op`(lhs, rhs): "true" else: "false",
-    loc: self.loc
-  )))
-
-proc eval*(self: Expr): Expr =
-  case self.kind
-  of ekAtom: return self
-  of ekTuple:
-    result = self
-    result.items = result.items.mapIt(it.eval())
-  of ekEval:
-    let op = self.op.eval.expectAtom.expectSymbol
-    let lhs = self.lhs.eval.expectAtom
-    case lhs.kind
-    of akInteger:
-      let lhs = lhs.expectInteger
-      let rhs = self.rhs.eval.expectAtom.expectInteger
-      case op.name
-      of "+": return intOp(`+`)
-      of "-": return intOp(`-`)
-      of "*": return intOp(`*`)
-      of "%": return intOp(`%%`)
-      of "<": return boolOp(`<`)
-      of "<=": return boolOp(`<=`)
-      of ">": return boolOp(`>`)
-      of ">=": return boolOp(`>=`)
-      of "==": return boolOp(`==`)
-      of "!=": return boolOp(`!=`)
-      else:
-        panic op.loc, &"Unknown integer operation `{op}`."
-    of akSymbol:
-      let lhs = lhs.symbol.expectBool
-      let rhs = self.rhs.eval.expectAtom.expectSymbol.expectBool
-      case op.name
-      of "||": return boolOp(`or`)
-      of "&&": return boolOp(`and`)
-      else:
-        panic op.loc, &"Unknown boolean operation `{op}`."
