@@ -94,7 +94,7 @@ proc parsePrimary(lexer: var Lexer, types: Table[Symbol, TypeExpr]): TypeExpr =
     discard lexer.next()
     let inner = parseTypeExpr(lexer, types)
     discard lexer.expect(")")
-    return inner
+    return TypeExpr(kind: tekEnclosed, inner: inner, enclosedLoc: symbol.loc)
   else:
     discard lexer.next()
     case symbol.toAtom.kind
