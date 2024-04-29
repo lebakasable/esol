@@ -1,0 +1,52 @@
+trace (UTM Dec) {
+  %
+    (Dec 1 0 -> Halt) (Dec 0 1 -> Dec)
+  &
+  (> 1) 1 1 1 0
+}
+
+type State { Inc Dec Halt }
+type Bit { 0 1 }
+type Action { -> <- . }
+type Rule State * Bit * Bit * Action * State
+type Any Rule + { & } + Bit
+
+var s : State
+case (UTM s) % % -> (Read s)
+
+var s : State
+var r : Bit
+case (Read s) (> r) (> r) <- (Match s r)
+
+var s : State
+var _ : Any
+case (Read s) _ _ -> (Read s)
+
+var s n : State
+var r w : Bit
+var a : Action
+case (Match s r) (s r w a n) (s r w a n) -> (Write w a n)
+
+var s : State
+var r : Bit
+var _ : Any
+case (Match s r) _ _ <- (Match s r)
+
+var w : Bit
+var a : Action
+var n : State
+var _ : Bit
+case (Write w a n) (> _) w a (Next n)
+
+var w : Bit
+var a : Action
+var n : State
+var _ : Any
+case (Write w a n) _ _ -> (Write w a n)
+
+var s : State
+case (Next s) & & . Tape_Underflow
+
+var s : State
+var r : Bit
+case (Next s) r (> r) <- (Match s r)
