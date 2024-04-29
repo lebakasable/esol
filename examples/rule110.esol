@@ -1,16 +1,26 @@
 type Cell { . # }
 
-case Entry & & -> I
+run Entry { % . . . . . . . . . . . . . . . # . & 1 1 1 1 1 1 1 1 1 1 1 1 1 0 }
+
+case Entry % % ! I
+case I % % -> I
 
 var a     : Cell case I       a a -> (I a)
 var a b   : Cell case (I a)   b b -> (I a b)
 var a b c : Cell case (I a b) c c <- (R a b c)
 var a b   : Cell case (I a b) & & .  Print
 
-case Print  & & !  Skip
-case Skip & & <- Reset
-var a : Cell case Reset a a <- Reset
-case Reset & & -> I
+case Print & & ! Dec
+
+case Dec 0 0 <- Dec1
+var _ : { 1 & } case Dec _ _ -> Dec
+case Dec1 1 0 <- Reset
+case Dec1 & & . Halt
+
+case Reset % % -> I
+var _ : Cell + { 1 & } {
+	case Reset _ _ <- Reset
+}
 
 var _ : Cell {
 	case (R . . .) _ . -> (I .)
@@ -23,5 +33,3 @@ var _ : Cell {
 	case (R # # #) _ . -> (I #)
 }
 
-// TODO: way to limit amount of iteration
-run Entry { & . . . . . . . . . . . . . . . # . & }
