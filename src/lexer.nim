@@ -8,8 +8,8 @@ import
   std/strformat,
   std/hashes
 
-const SPECIAL = (['(', '{', '[',      '.'],
-                 [')', '}', ']', ':', '.'])
+const SPECIAL = (['(', '{', '[',      '.', '!'],
+                 [')', '}', ']', ':', '.', '!'])
   
 type
   Loc* = object
