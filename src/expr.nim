@@ -58,7 +58,12 @@ proc `$`*(self: Expr): string =
 proc `==`*(self, other: Expr): bool =
   case (self.kind, other.kind)
   of (ekAtom, ekAtom):
-    return self.atom.symbol == other.atom.symbol
+    case (self.atom.kind, other.atom.kind)
+    of (akSymbol, akSymbol):
+      return self.atom.symbol == other.atom.symbol
+    of (akInteger, akInteger):
+      return self.atom.value == other.atom.value
+    else: return false
   of (ekTuple, ekTuple):
     if self.items.len != other.items.len: return false
     for (a, b) in self.items.zip(other.items):
@@ -125,7 +130,7 @@ proc expectAtom*(self: Expr): Atom =
 proc expectSymbol*(self: Atom): Symbol =
   case self.kind
   of akSymbol: return self.symbol
-  of akInteger: panic self.symbol.loc, &"Expected symbol but got integer `{self.value}`."
+  of akInteger: panic self.loc, &"Expected symbol but got integer `{self.value}`."
 
 proc expectInteger*(self: Atom): int =
   case self.kind
@@ -240,6 +245,19 @@ proc normalize*(self: Expr): Expr =
   of ekEval:
     panic "Normalizing `eval` expressions has not been implemented yet."
 
+template intOp(op: untyped): Expr =
+  Expr(kind: ekAtom, atom: Atom(
+    kind: akInteger,
+    value: `op`(lhs, rhs),
+    loc: self.loc,
+  ))
+  
+template boolOp(op: untyped): Expr =
+  Expr(kind: ekAtom, atom: Atom(kind: akSymbol, symbol: Symbol(
+    name: if `op`(lhs, rhs): "true" else: "false",
+    loc: self.loc
+  )))
+
 proc eval*(self: Expr): Expr =
   case self.kind
   of ekAtom: return self
@@ -254,38 +272,23 @@ proc eval*(self: Expr): Expr =
       let lhs = lhs.expectInteger
       let rhs = self.rhs.eval.expectAtom.expectInteger
       case op.name
-      of "+":
-        return Expr(kind: ekAtom, atom: Atom(
-          kind: akInteger,
-          value: lhs + rhs,
-          loc: self.loc,
-        ))
-      of "%":
-        return Expr(kind: ekAtom, atom: Atom(
-          kind: akInteger,
-          value: lhs %% rhs,
-          loc: self.loc,
-        ))
-      of "<":
-        return Expr(kind: ekAtom, atom: Atom(kind: akSymbol, symbol: Symbol(
-          name: if lhs < rhs: "true" else: "false",
-          loc: self.loc
-        )))
-      of "==":
-        return Expr(kind: ekAtom, atom: Atom(kind: akSymbol, symbol: Symbol(
-          name: if lhs == rhs: "true" else: "false",
-          loc: self.loc
-        )))
+      of "+": return intOp(`+`)
+      of "-": return intOp(`-`)
+      of "*": return intOp(`*`)
+      of "%": return intOp(`%%`)
+      of "<": return boolOp(`<`)
+      of "<=": return boolOp(`<=`)
+      of ">": return boolOp(`>`)
+      of ">=": return boolOp(`>=`)
+      of "==": return boolOp(`==`)
+      of "!=": return boolOp(`!=`)
       else:
-        panic op.loc, &"Unknown operation `{op}`."
+        panic op.loc, &"Unknown integer operation `{op}`."
     of akSymbol:
       let lhs = lhs.symbol.expectBool
       let rhs = self.rhs.eval.expectAtom.expectSymbol.expectBool
       case op.name
-      of "||":
-        return Expr(kind: ekAtom, atom: Atom(kind: akSymbol, symbol: Symbol(
-          name: if lhs or rhs: "true" else: "false",
-          loc: self.loc
-        )))
+      of "||": return boolOp(`or`)
+      of "&&": return boolOp(`and`)
       else:
-        panic op.loc, &"Unknown operation `{op}`."
+        panic op.loc, &"Unknown boolean operation `{op}`."
