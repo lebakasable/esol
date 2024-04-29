@@ -78,15 +78,24 @@ proc normalize(self: Case): Case =
     next:    self.next.normalize(),
   )
 
-# TODO: fix expand
+proc expandRecursively(self: Case, scope: var Table[Symbol, HashSet[Expr]], index: int, normalize = false) =
+  if index >= scope.len:
+    var self = self
+    self.write = self.write.eval
+    self.action = self.action.eval
+    self.next = self.next.eval
+    if normalize:
+      echo self.normalize()
+    else:
+      echo self
+  else:
+    self.expandRecursively(scope, index + 1, normalize)
+
 proc expand(self: ScopedCase, types: Table[Symbol, TypeExpr],  normalize = false) =
+  var scope = initTable[Symbol, HashSet[Expr]]()
   for name, `type` in self.scope:
-    for typeExpr in `type`.expand(types):
-      let `case` = self.`case`.substituteVar(name, typeExpr)
-      if normalize:
-        echo `case`.normalize()
-      else:
-        echo `case`
+    scope[name] = `type`.expand(types)
+  self.`case`.expandRecursively(scope, 0, normalize)
 
 proc typeCheckNextCase(self: ScopedCase, types: Table[Symbol, TypeExpr], state: Expr, read: Expr): Option[(Expr, Expr, Expr)] =
   var bindings = initTable[Symbol, Expr]()

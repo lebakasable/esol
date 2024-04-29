@@ -13,6 +13,7 @@ import
 type
   TypeExprKind* = enum
     tekNamed
+    tekEnclosed
     tekAnonymous
     tekInteger
     tekUnion
@@ -22,8 +23,12 @@ type
     case kind*: TypeExprKind
     of tekNamed:
       name*: Symbol
+    of tekEnclosed:
+      inner*: TypeExpr
+      enclosedLoc*: Loc
     of tekAnonymous:
       anonymousElements*: HashSet[Expr]
+      anonymousLoc*: Loc
     of tekInteger:
       symbol*: Symbol
     of tekUnion, tekDiff:
@@ -35,6 +40,8 @@ type
 proc `$`*(self: TypeExpr): string =
   case self.kind
   of tekNamed: return self.name.name
+  of tekEnclosed:
+    return &"({self.inner})"
   of tekAnonymous:
     var buffer = "{"
     for element in self.anonymousElements:
@@ -48,21 +55,28 @@ proc `$`*(self: TypeExpr): string =
       if i > 0: result &= " * "
       else: result &= $element
 
+proc loc*(self: TypeExpr): Loc =
+  case self.kind
+  of tekNamed: return self.name.loc
+  of tekEnclosed: return self.enclosedLoc
+  of tekAnonymous: return self.anonymousLoc
+  of tekInteger: return self.symbol.loc
+  of tekUnion, tekDiff: return self.lhs.loc
+  of tekProduct: return self.productElements[0].loc
+
 proc parseTypeExpr*(lexer: var Lexer, types: Table[Symbol, TypeExpr]): TypeExpr
 
 proc parseAnonymous(lexer: var Lexer): HashSet[Expr] =
   discard lexer.expect("{")
-  var `type` = newSeq[Expr]()
   while Some(@symbol) ?= lexer.peek():
     if symbol.name == "}": break
     let value = parseExpr(lexer).eval()
-    if Some(@existingValue) ?= `type`.get(value):
+    if Some(@existingValue) ?= result.get(value):
       error value.loc, "Type may only consist of non-repeating values."
       note existingValue.loc, "Same value was provided here."
       quit(1)
-    `type`.add(value)
+    result.incl(value)
   discard lexer.expect("}")
-  return `type`.toHashSet
 
 proc parsePrimary(lexer: var Lexer, types: Table[Symbol, TypeExpr]): TypeExpr =
   if None() ?= lexer.peek():
@@ -71,7 +85,11 @@ proc parsePrimary(lexer: var Lexer, types: Table[Symbol, TypeExpr]): TypeExpr =
   case symbol.name
   of "{":
     let elements = parseAnonymous(lexer)
-    return TypeExpr(kind: tekAnonymous, anonymousElements: elements)
+    return TypeExpr(
+      kind: tekAnonymous,
+      anonymousElements: elements,
+      anonymousLoc: symbol.loc
+    )
   of "(":
     discard lexer.next()
     let inner = parseTypeExpr(lexer, types)
@@ -121,10 +139,22 @@ proc parseTypeExpr*(lexer: var Lexer, types: Table[Symbol, TypeExpr]): TypeExpr 
     else: break
   return lhs
 
+proc expandProductRecursively(expandedElements: seq[HashSet[Expr]], itemLoc: Loc, items: var seq[Expr], result: var HashSet[Expr]) =
+  case expandedElements
+  of [@head, all @tail]:
+    for element in head:
+      items.add(element)
+      expandProductRecursively(tail, itemLoc, items, result)
+      discard items.pop()
+  of []:
+    result.incl(Expr(kind: ekTuple, items: items, tupleLoc: itemLoc))
+
 proc expand*(self: TypeExpr, types: Table[Symbol, TypeExpr]): HashSet[Expr] =
   case self.kind
   of tekNamed:
     return types[self.name].expand(types)
+  of tekEnclosed:
+    return self.inner.expand(types)
   of tekAnonymous:
     return self.anonymousElements
   of tekInteger:
@@ -134,7 +164,11 @@ proc expand*(self: TypeExpr, types: Table[Symbol, TypeExpr]): HashSet[Expr] =
   of tekDiff:
     return self.lhs.expand(types).difference(self.rhs.expand(types))
   of tekProduct:
-    panic "todo: expand"
+    var expandedElements = newSeq[HashSet[Expr]]()
+    for element in self.productElements:
+      expandedElements.add(element.expand(types))
+    var items = newSeq[Expr]()
+    expandProductRecursively(expandedElements, self.loc, items, result)
     
 proc contains*(self: TypeExpr, element: Expr, types: Table[Symbol, TypeExpr]): bool =
   case self.kind
@@ -143,6 +177,7 @@ proc contains*(self: TypeExpr, element: Expr, types: Table[Symbol, TypeExpr]): b
       return typeExpr.contains(element, types)
     else:
       panic self.name.loc, &"The type `{self.name}` is not defined."
+  of tekEnclosed: return self.inner.contains(element, types)
   of tekAnonymous: return self.anonymousElements.contains(element)
   of tekInteger: return element.kind == ekAtom and element.atom.kind == akInteger
   of tekUnion: return self.lhs.contains(element, types) or self.rhs.contains(element, types)
