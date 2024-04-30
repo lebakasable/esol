@@ -13,46 +13,13 @@ import
   std/sequtils,
   std/sets
 
-type
-  Case = object
-    keyword: Symbol
-    state: Expr
-    read: Expr
-    write: Expr
-    action: Expr
-    next: Expr
-  ScopedCase = object
-    `case`: Case
-    scope: Table[Symbol, TypeExpr]
-  StatementKind = enum
-    skCase
-    skVar
-    skBlock
-  Statement = ref object
-    case kind: StatementKind
-    of skCase:
-      `case`: Case
-    of skVar:
-      name: Symbol
-      `type`: TypeExpr
-      body: Statement
-    of skBlock:
-      statements: seq[Statement]
-  Run = object
-    keyword: Symbol
-    state: Expr
-    tape: seq[Expr]
-    trace: bool
-  Program = object
-    scopedCases: seq[ScopedCase]
-    types: Table[Symbol, TypeExpr]
-    runs: seq[Run]
-  Machine = object
-    state: Expr
-    tape: seq[Expr]
-    tapeDefault: Expr
-    head: int
-    halt: bool
+type Case = object
+  keyword: Symbol
+  state: Expr
+  read: Expr
+  write: Expr
+  action: Expr
+  next: Expr
 
 proc `$`(self: Case): string =
   &"{self.keyword} {self.state} {self.read} {self.write} {self.action} {self.next}"
@@ -91,6 +58,10 @@ proc expandRecursively(self: Case, scope: var Table[Symbol, HashSet[Expr]], inde
   else:
     self.expandRecursively(scope, index + 1, normalize)
 
+type ScopedCase = object
+  `case`: Case
+  scope: Table[Symbol, TypeExpr]
+
 proc expand(self: ScopedCase, types: Table[Symbol, TypeExpr],  normalize = false) =
   var scope = initTable[Symbol, HashSet[Expr]]()
   for name, `type` in self.scope:
@@ -109,6 +80,22 @@ proc typeCheckNextCase(self: ScopedCase, types: Table[Symbol, TypeExpr], state: 
       self.`case`.action.substituteBindings(bindings),
       self.`case`.next.substituteBindings(bindings),
     ))
+
+type
+  StatementKind = enum
+    skCase
+    skVar
+    skBlock
+  Statement = ref object
+    case kind: StatementKind
+    of skCase:
+      `case`: Case
+    of skVar:
+      name: Symbol
+      `type`: TypeExpr
+      body: Statement
+    of skBlock:
+      statements: seq[Statement]
 
 proc `$`(self: Statement): string =
   case self.kind
@@ -184,6 +171,33 @@ proc parseStatement(lexer: var Lexer, types: Table[Symbol, TypeExpr]): Statement
       statements: statements,
     )
     
+type Run = object
+  keyword: Symbol
+  state: Expr
+  tape: seq[Expr]
+  trace: bool
+
+proc expand(self: Run, normalize = false) =
+  let keyword = if self.trace: "trace" else: "run"
+  var tape = "{ "
+  for expr in self.tape:
+    if normalize:
+      tape &= &"{expr.normalize()} "
+    else:
+      tape &= &"{expr} "
+  tape &= "}"
+  echo &"{keyword} {self.state} {tape}"
+
+type Program = object
+  scopedCases: seq[ScopedCase]
+  types: Table[Symbol, TypeExpr]
+  runs: seq[Run]
+
+proc compileCasesFromStatements(types: Table[Symbol, TypeExpr], statements: seq[Statement]): seq[ScopedCase] =
+  for statement in statements:
+    var scope = initTable[Symbol, TypeExpr]()
+    statement.compileToCases(types, scope, result)
+
 proc parseSource(lexer: var Lexer): (seq[Statement], Table[Symbol, TypeExpr], seq[Run]) =
   while Some(@key) ?= lexer.peek():
     case key.name
@@ -213,21 +227,12 @@ proc parseSource(lexer: var Lexer): (seq[Statement], Table[Symbol, TypeExpr], se
     else:
       panic key.loc, &"Unknown keyword `{key}`."
 
-proc compileCasesFromStatements(types: Table[Symbol, TypeExpr], statements: seq[Statement]): seq[ScopedCase] =
-  for statement in statements:
-    var scope = initTable[Symbol, TypeExpr]()
-    statement.compileToCases(types, scope, result)
-
-proc expand(self: Run, normalize = false) =
-  let keyword = if self.trace: "trace" else: "run"
-  var tape = "{ "
-  for expr in self.tape:
-    if normalize:
-      tape &= &"{expr.normalize()} "
-    else:
-      tape &= &"{expr} "
-  tape &= "}"
-  echo &"{keyword} {self.state} {tape}"
+type Machine = object
+  state: Expr
+  tape: seq[Expr]
+  tapeDefault: Expr
+  head: int
+  halt: bool
 
 proc print(self: Machine) =
   for expr in self.tape:
@@ -249,8 +254,8 @@ proc next(self: var Machine, program: var Program) =
   for `case` in program.scopedCases:
     if Some((@write, @action, @next)) ?= `case`.typeCheckNextCase(program.types, self.state, self.tape[self.head]):
       self.tape[self.head] = eval(write)
-      if Some(@action) ?= action.asSymbol():
-        case action.name:
+      if action.kind == ekAtom and action.atom.kind == akSymbol:
+        case action.atom.symbol.name:
           of "<-":
             if self.head == 0:
               panic action.loc, "Tape underflow."

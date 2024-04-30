@@ -21,6 +21,31 @@ type
     of akInteger:
       value*: int
       loc*: Loc
+
+proc toAtom*(symbol: Symbol): Atom =
+  try:
+    return Atom(kind: akInteger, value: symbol.name.parseInt, loc: symbol.loc)
+  except:
+    return Atom(kind: akSymbol, symbol: symbol)
+
+proc expectSymbol*(self: Atom): Symbol =
+  case self.kind
+  of akSymbol: return self.symbol
+  of akInteger: panic self.loc, &"Expected symbol but got integer `{self.value}`."
+
+proc expectInteger*(self: Atom): int =
+  case self.kind
+  of akInteger: return self.value
+  of akSymbol: panic self.symbol.loc, &"Expected integer but got symbol `{self.symbol}`."
+
+proc expectBool*(self: Symbol): bool =
+  case self.name
+  of "true": return true
+  of "false": return false
+  else:
+    panic self.loc, &"Expected boolean but got symbol `{self.name}`."
+
+type
   ExprKind* = enum
     ekAtom
     ekTuple
@@ -75,12 +100,6 @@ proc `==`*(self, other: Expr): bool =
 
 proc hash*(self: Expr): Hash = hash($self)
 
-proc loc*(self: Expr): Loc =
-  case self.kind
-  of ekAtom: return self.atom.symbol.loc
-  of ekTuple: return self.tupleLoc
-  of ekEval: return self.evalLoc
-
 proc toExpr*(symbol: Symbol): Expr =
   return Expr(kind: ekAtom, atom: Atom(kind: akSymbol, symbol: symbol))
 
@@ -119,11 +138,11 @@ proc parseExpr*(lexer: var Lexer): Expr =
     except:
       return toExpr(symbol)
 
-proc toAtom*(symbol: Symbol): Atom =
-  try:
-    return Atom(kind: akInteger, value: symbol.name.parseInt, loc: symbol.loc)
-  except:
-    return Atom(kind: akSymbol, symbol: symbol)
+proc loc*(self: Expr): Loc =
+  case self.kind
+  of ekAtom: return self.atom.symbol.loc
+  of ekTuple: return self.tupleLoc
+  of ekEval: return self.evalLoc
 
 proc expectAtom*(self: Expr): Atom =
   case self.kind
@@ -131,22 +150,59 @@ proc expectAtom*(self: Expr): Atom =
   of ekTuple: panic self.tupleLoc, &"Expected atom but got tuple `{self}`."
   of ekEval: panic self.evalLoc, &"Expected atom but got eval expression `{self}`."
 
-proc expectSymbol*(self: Atom): Symbol =
+proc usesVar*(self: Expr, name: Symbol): Option[Symbol] =
   case self.kind
-  of akSymbol: return self.symbol
-  of akInteger: panic self.loc, &"Expected symbol but got integer `{self.value}`."
+  of ekAtom:
+    case self.atom.kind
+    of akSymbol:
+      if self.atom.symbol == name:
+        return some(self.atom.symbol)
+    of akInteger: return
+  of ekTuple:
+    for item in self.items:
+      if Some(@symbol) ?= item.usesVar(name):
+        return some(symbol)
+  of ekEval:
+    return self.lhs.usesVar(name).orElse(self.rhs.usesVar(name))
 
-proc expectInteger*(self: Atom): int =
+proc normalize*(self: Expr): Expr =
   case self.kind
-  of akInteger: return self.value
-  of akSymbol: panic self.symbol.loc, &"Expected integer but got symbol `{self.symbol}`."
+  of ekAtom: return self
+  of ekTuple:
+    var buffer = "_"
+    for i, item in enumerate(self.items):
+      if i > 0: buffer &= "_"
+      buffer &= $item.normalize()
+    buffer &= "_"
+    return Expr(kind: ekAtom, atom: Atom(
+      kind: akSymbol,
+      symbol: Symbol(name: buffer, loc: self.tupleLoc),
+    ))
+  of ekEval:
+    panic "Normalizing `eval` expressions has not been implemented yet."
 
-proc expectBool*(self: Symbol): bool =
-  case self.name
-  of "true": return true
-  of "false": return false
-  else:
-    panic self.loc, &"Expected boolean but got symbol `{self.name}`."
+proc substituteBindings*(self: Expr, bindings: Table[Symbol, Expr]): Expr =
+  case self.kind
+  of ekAtom:
+    case self.atom.kind
+    of akSymbol:
+      if Some(@expr) ?= bindings.get(self.atom.symbol):
+        return expr
+      else: 
+        return self
+    of akInteger:
+      return self
+  of ekTuple:
+    let items = self.items.mapIt(it.substituteBindings(bindings))
+    return Expr(kind: ekTuple, items: items, tupleLoc: self.tupleLoc)
+  of ekEval:
+    return Expr(
+      kind: ekEval,
+      lhs: self.lhs.substituteBindings(bindings),
+      op: self.op.substituteBindings(bindings),
+      rhs: self.rhs.substituteBindings(bindings),
+      evalLoc: self.evalLoc,
+    )
 
 template intOp(op: untyped): Expr =
   Expr(kind: ekAtom, atom: Atom(
@@ -202,36 +258,6 @@ proc asVar*(self: Atom, scope: Table[Symbol, TypeExpr]): Option[TypeExpr] =
   if self.kind == akSymbol:
     return scope.get(self.symbol)
 
-proc exprFromSymbol*(symbol: Symbol): Expr =
-  return Expr(kind: ekAtom, atom: symbol.toAtom())
-
-proc asSymbol*(self: Expr): Option[Symbol] =
-  if self.kind == ekAtom:
-    return some(self.atom.symbol)
- 
-proc substituteBindings*(self: Expr, bindings: Table[Symbol, Expr]): Expr =
-  case self.kind
-  of ekAtom:
-    case self.atom.kind
-    of akSymbol:
-      if Some(@expr) ?= bindings.get(self.atom.symbol):
-        return expr
-      else: 
-        return self
-    of akInteger:
-      return self
-  of ekTuple:
-    let items = self.items.mapIt(it.substituteBindings(bindings))
-    return Expr(kind: ekTuple, items: items, tupleLoc: self.tupleLoc)
-  of ekEval:
-    return Expr(
-      kind: ekEval,
-      lhs: self.lhs.substituteBindings(bindings),
-      op: self.op.substituteBindings(bindings),
-      rhs: self.rhs.substituteBindings(bindings),
-      evalLoc: self.evalLoc,
-    )
-
 proc patternMatch*(self: Expr, value: Expr, bindings: var Table[Symbol, Expr], scope: Table[Symbol, TypeExpr]): bool =
   case self.kind
   of ekAtom:
@@ -261,35 +287,4 @@ proc patternMatch*(self: Expr, value: Expr, bindings: var Table[Symbol, Expr], s
         return false
       return true
     of ekAtom, ekTuple: return false
-
-proc usesVar*(self: Expr, name: Symbol): Option[Symbol] =
-  case self.kind
-  of ekAtom:
-    case self.atom.kind
-    of akSymbol:
-      if self.atom.symbol == name:
-        return some(self.atom.symbol)
-    of akInteger: return
-  of ekTuple:
-    for item in self.items:
-      if Some(@symbol) ?= item.usesVar(name):
-        return some(symbol)
-  of ekEval:
-    return self.lhs.usesVar(name).orElse(self.rhs.usesVar(name))
-
-proc normalize*(self: Expr): Expr =
-  case self.kind
-  of ekAtom: return self
-  of ekTuple:
-    var buffer = "_"
-    for i, item in enumerate(self.items):
-      if i > 0: buffer &= "_"
-      buffer &= $item.normalize()
-    buffer &= "_"
-    return Expr(kind: ekAtom, atom: Atom(
-      kind: akSymbol,
-      symbol: Symbol(name: buffer, loc: self.tupleLoc),
-    ))
-  of ekEval:
-    panic "Normalizing `eval` expressions has not been implemented yet."
 
