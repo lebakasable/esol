@@ -396,23 +396,47 @@ commands = @[
       let source = try: readFile(sourcePath)
                    except: panic &"Could not read file `{sourcePath}`."
       var lexer = tokenize(sourcePath, source)
-      var (statements, _, _) = parseSource(lexer)
+      var (statements, types, runs) = parseSource(lexer)
+
+      if runs.len > 1:
+        warn "Several runs were found, so the first one has been taken to be the first state."
+
+      let cases = compileCasesFromStatements(types, statements).mapIt(it.`case`)
 
       var states = initTable[Expr, HashSet[Expr]]()
-      for `case` in statements.filterIt(it.kind == skCase).mapIt(it.`case`):
+      for `case` in cases:
         if states.hasKey(`case`.state):
-          states[`case`.state].incl(`case`.next)
+          states[`case`.state].incl(`case`.read)
         else:
-          states[`case`.state] = [`case`.next].toHashSet
+          states[`case`.state] = [`case`.read].toHashSet
+        if states.hasKey(`case`.read):
+          states[`case`.read].incl(`case`.next)
+        else:
+          states[`case`.read] = [`case`.next].toHashSet
+        if not states.hasKey(`case`.next):
+          states[`case`.next] = initHashSet[Expr]()
 
-      echo "digraph {"
-      for state, nexts in states:
-        echo &"  {state.normalize()} [label=\"{state}\"]"
-        var next = " "
-        for state in nexts:
-          echo &"  {state.normalize()} [label=\"{state}\"]"
-          next &= &"{state.normalize()} "
-        echo &"  {state.normalize()} -> {{{next}}}"
+      echo  "digraph {"
+      echo &"  label=\"{sourcePath}\""
+      echo  "  fontname=\"JetBrainsMono Nerd Font Mono\""
+      echo  "  node [shape=rect, fontname=\"JetBrainsMono Nerd Font Mono\"]"
+      echo  "  Start [shape=ellipse]"
+      echo  "  End [shape=ellipse]"
+
+      for i, state, nexts in enumerate(states):
+        if runs.len > 0 and state == runs[0].state:
+          echo &"  Start -> {state.hash}"
+
+        echo &"  {state.hash} [label=\"{state}\"]"
+
+        if nexts.len > 0:
+          var next = " "
+          for state in nexts:
+            next &= &"{state.hash} "
+          echo &"  {state.hash} -> {{{next}}}"
+        else:
+          echo &"  {state.hash} -> End"
+
       echo "}"
   ),
   Command(
