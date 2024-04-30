@@ -382,6 +382,40 @@ commands = @[
         echo &"{symbol.loc}: {symbol.name}"
   ),
   Command(
+    name: "graph",
+    description: "Generates a graph from an Esol file.",
+    signature: "<input.esol>",
+    run: proc (args: var seq[string]) =
+      var sourcePath: string
+      if Some(@path) ?= args.shift:
+        sourcePath = path
+      else:
+        usage(stderr)
+        panic "No input file is provided."
+
+      let source = try: readFile(sourcePath)
+                   except: panic &"Could not read file `{sourcePath}`."
+      var lexer = tokenize(sourcePath, source)
+      var (statements, _, _) = parseSource(lexer)
+
+      var states = initTable[Expr, HashSet[Expr]]()
+      for `case` in statements.filterIt(it.kind == skCase).mapIt(it.`case`):
+        if states.hasKey(`case`.state):
+          states[`case`.state].incl(`case`.next)
+        else:
+          states[`case`.state] = [`case`.next].toHashSet
+
+      echo "digraph {"
+      for state, nexts in states:
+        echo &"  {state.normalize()} [label=\"{state}\"]"
+        var next = " "
+        for state in nexts:
+          echo &"  {state.normalize()} [label=\"{state}\"]"
+          next &= &"{state.normalize()} "
+        echo &"  {state.normalize()} -> {{{next}}}"
+      echo "}"
+  ),
+  Command(
     name: "help",
     description: "Prints this help message.",
     signature: "         ",
